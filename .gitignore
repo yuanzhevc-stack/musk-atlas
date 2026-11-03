@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.local/
+.env
+.env.*
+!.env.example
+output/
+*.zip
+.DS_Store
+.playwright-cli/
+*.tsbuildinfo
+# Original Word Atlas media and bulky upstream files (not used in this build)
+public/atlas/audio/
+public/atlas/img/
+public/atlas/thumb/
+public/brand/
+public/sfx/
+docs/assets/
+data/word-atlas.json
+data/word-atlas.csv
+PUBLIC_MANIFEST.json
