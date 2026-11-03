@@ -2,17 +2,13 @@ import { Bookmark, BookmarkCheck, Play, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { go } from "../lib/router";
 import { clock, loadCorpus, search, type Corpus, type Hit } from "../musk/corpus";
-import { Player } from "../musk/Player";
+import { ClipPlayer } from "../musk/ClipPlayer";
 import { useVocab, vocab } from "../musk/vocab";
 
 const SUGGEST = ["look at", "fundamental", "wow", "actually", "physics", "I think"];
 
 interface Clip {
-  videoId: string;
-  title: string;
-  start: number;
-  end: number;
-  sentence: string;
+  hit: Hit;
   nonce: number;
 }
 
@@ -51,8 +47,30 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
   const hits = muskOnly ? all.filter((h) => h.sentence.k !== "host") : all;
   const videoCount = new Set(hits.map((h) => h.sentence.v)).size;
 
-  const play = (h: Hit) =>
-    setClip({ videoId: h.sentence.v, title: h.video.title, start: h.start, end: h.end, sentence: h.sentence.t, nonce: Date.now() });
+  const play = (h: Hit) => setClip({ hit: h, nonce: Date.now() });
+  const index = clip ? hits.findIndex((h) => h.id === clip.hit.id) : -1;
+
+  // playphrase-style keys: ↓/↑ next/prev (auto-play), Enter/Space replay.
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const typing = (e.target as HTMLElement).tagName === "INPUT" && (e.target as HTMLInputElement).type !== "checkbox";
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        if (!hits.length) return;
+        e.preventDefault();
+        const d = e.key === "ArrowDown" ? 1 : -1;
+        const next = hits[Math.min(hits.length - 1, Math.max(0, index < 0 ? 0 : index + d))];
+        play(next);
+        document.querySelector(`[data-hit="${next.id}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      } else if (e.key === "Enter" || (e.key === " " && !typing)) {
+        if (!hits.length) return;
+        e.preventDefault();
+        play(clip && index >= 0 ? clip.hit : hits[0]);
+      }
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  });
 
   return (
     <div className="page musk-page">
@@ -105,10 +123,10 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
         <ol className="musk-hits">
           {hits.slice(0, 300).map((h) => {
             const id = `${h.sentence.v}@${h.start}`;
-            const on = clip?.videoId === h.sentence.v && clip.start === h.start;
+            const on = clip?.hit.id === h.id;
             const isSaved = saved.some((x) => x.id === id);
             return (
-              <li key={h.id} className={`musk-hit ${on ? "is-on" : ""}`}>
+              <li key={h.id} data-hit={h.id} className={`musk-hit ${on ? "is-on" : ""} ${h.sentence.c ? "" : "no-clip"}`}>
                 <button className="musk-hit-main" onClick={() => play(h)} data-testid="hit">
                   <span className="musk-play">
                     <Play size={14} fill="currentColor" />
@@ -141,14 +159,15 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
 
         {clip && (
           <aside className="musk-stage" aria-label="播放器">
-            <Player videoId={clip.videoId} start={clip.start} end={clip.end} nonce={clip.nonce} />
-            <p className="musk-stage-text">{clip.sentence}</p>
+            <ClipPlayer sentence={clip.hit.sentence} from={clip.hit.from} to={clip.hit.to} nonce={clip.nonce} />
             <p className="musk-source">
-              {clip.title} · {clock(clip.start)} ·{" "}
-              <a href={`https://youtu.be/${clip.videoId}?t=${Math.max(0, Math.floor(clip.start - 1))}`} target="_blank" rel="noreferrer">
+              {index >= 0 && `${index + 1} / ${hits.length} · `}
+              {clip.hit.video.title} · {clock(clip.hit.start)} ·{" "}
+              <a href={`https://youtu.be/${clip.hit.sentence.v}?t=${Math.max(0, Math.floor(clip.hit.start - 1))}`} target="_blank" rel="noreferrer">
                 在 YouTube 打开
               </a>
             </p>
+            <p className="musk-keys">↑ ↓ 上一句 / 下一句 · Enter 重播</p>
           </aside>
         )}
       </div>
@@ -159,7 +178,12 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
           <ul>
             {saved.map((s) => (
               <li key={s.id}>
-                <button className="musk-hit-main" onClick={() => setClip({ videoId: s.videoId, title: s.title, start: s.start, end: s.end, sentence: s.sentence, nonce: Date.now() })}>
+                <button className="musk-hit-main" onClick={() => {
+                    const si = corpus?.sentences.find((x) => x.v === s.videoId && x.t === s.sentence);
+                    if (!si || !corpus) return;
+                    const i = si.t.indexOf(s.phrase);
+                    setClip({ hit: { id: `saved:${s.id}`, sentence: si, video: corpus.videos[si.v], start: s.start, end: s.end, from: Math.max(0, i), to: i < 0 ? 0 : i + s.phrase.length }, nonce: Date.now() });
+                  }}>
                   <span className="musk-play">
                     <Play size={14} fill="currentColor" />
                   </span>

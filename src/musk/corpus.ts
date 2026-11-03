@@ -15,6 +15,8 @@ export interface Sentence {
   t: string;
   k: "musk" | "host" | null;
   w: Tok[];
+  /** Clip path relative to BASE_URL, if a clip was cut. */
+  c: string | null;
 }
 export interface Corpus {
   videos: Record<string, Video>;
@@ -69,7 +71,8 @@ export function search(c: Corpus, query: string): Hit[] {
       }
     }
   });
-  return hits;
+  // Playable clips first, then source order.
+  return hits.sort((a, b) => Number(!a.sentence.c) - Number(!b.sentence.c));
 }
 
 export const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
