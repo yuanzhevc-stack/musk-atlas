@@ -14,6 +14,10 @@ export interface Sentence {
   e: number;
   t: string;
   k: "musk" | "host" | null;
+  /** Voiceprint verification (ECAPA vs Musk centroid). */
+  m: "musk" | "uncertain" | "not_musk" | null;
+  /** Cosine similarity to the Musk voiceprint. */
+  p: number | null;
   w: Tok[];
   /** Clip path relative to BASE_URL, if a clip was cut. */
   c: string | null;

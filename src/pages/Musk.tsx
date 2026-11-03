@@ -22,11 +22,21 @@ function Highlight({ text, from, to }: { text: string; from: number; to: number 
   );
 }
 
+export function SpeakerBadge({ m, p }: { m: Hit["sentence"]["m"]; p: number | null }) {
+  if (!m) return null;
+  const label = m === "musk" ? "已确认马斯克" : m === "uncertain" ? "不确定" : "非马斯克";
+  return (
+    <span className={`spk-badge spk-${m}`} data-testid="spk-badge" title={p == null ? undefined : `声纹相似度 ${p.toFixed(2)}`}>
+      {label}
+    </span>
+  );
+}
+
 export function MuskPage({ q: initial = "" }: { q?: string }) {
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState(initial);
-  const [muskOnly, setMuskOnly] = useState(false);
+  const [muskOnly, setMuskOnly] = useState(true);
   const [clip, setClip] = useState<Clip | null>(null);
   const saved = useVocab();
   const input = useRef<HTMLInputElement>(null);
@@ -42,9 +52,10 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
     return () => clearTimeout(t);
   }, [q]);
 
-  const hasSpeaker = !!corpus && Object.values(corpus.videos).some((v) => v.speaker);
+  const hasSpeaker = !!corpus && corpus.sentences.some((x) => x.m);
   const all = useMemo(() => (corpus && q.trim() ? search(corpus, q) : []), [corpus, q]);
-  const hits = muskOnly ? all.filter((h) => h.sentence.k !== "host") : all;
+  const hits = muskOnly ? all.filter((h) => h.sentence.m === "musk") : all;
+  const hidden = all.length - hits.length;
   const videoCount = new Set(hits.map((h) => h.sentence.v)).size;
 
   const play = (h: Hit) => setClip({ hit: h, nonce: Date.now() });
@@ -106,10 +117,11 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
           ) : (
             <span className="musk-count" data-testid="hit-count">
               {hits.length} 处 · {videoCount} 个视频
+              {muskOnly && hidden > 0 && <span className="musk-hidden"> · 另有 {hidden} 处未确认/非马斯克已隐藏</span>}
             </span>
           )}
           {hasSpeaker && (
-            <label className="musk-toggle" title="仅部分视频有说话人标注；未标注的句子会保留">
+            <label className="musk-toggle" title="按声纹验证：只显示确认是马斯克本人说的句子；关闭后显示全部（含不确定）">
               <input type="checkbox" checked={muskOnly} onChange={(e) => setMuskOnly(e.target.checked)} />
               <span>只看 Musk</span>
             </label>
@@ -137,7 +149,7 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
                     </span>
                     <span className="musk-source">
                       {h.video.title} · {clock(h.start)}
-                      {h.sentence.k === "host" && <em> · 主持人</em>}
+                      <SpeakerBadge m={h.sentence.m} p={h.sentence.p} />
                     </span>
                   </span>
                 </button>
@@ -162,7 +174,8 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
             <ClipPlayer sentence={clip.hit.sentence} from={clip.hit.from} to={clip.hit.to} nonce={clip.nonce} />
             <p className="musk-source">
               {index >= 0 && `${index + 1} / ${hits.length} · `}
-              {clip.hit.video.title} · {clock(clip.hit.start)} ·{" "}
+              {clip.hit.video.title} · {clock(clip.hit.start)}
+              <SpeakerBadge m={clip.hit.sentence.m} p={clip.hit.sentence.p} /> ·{" "}
               <a href={`https://youtu.be/${clip.hit.sentence.v}?t=${Math.max(0, Math.floor(clip.hit.start - 1))}`} target="_blank" rel="noreferrer">
                 在 YouTube 打开
               </a>

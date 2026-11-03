@@ -1,0 +1,12 @@
+import { chromium } from "playwright";
+const [url, shot, q = "look at"] = process.argv.slice(2);
+const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1280, height: 900 } });
+const bad = []; p.on("response", r => r.status() >= 400 && bad.push(r.status() + " " + r.url())); p.on("pageerror", e => bad.push("err " + e.message));
+await p.goto(url); await p.fill('input[aria-label="搜索单词或短语"]', q); await p.waitForSelector('[data-testid="hit"]');
+const on = { checked: await p.isChecked(".musk-toggle input"), count: await p.textContent('[data-testid="hit-count"]'), badges: await p.$$eval('[data-testid="spk-badge"]', x => [...new Set(x.map(e => e.textContent))]) };
+await p.click('[data-testid="hit"]'); await p.waitForTimeout(2500);
+const v = await p.$eval('[data-testid="clip"]', v => ({ src: v.currentSrc.split("/musk/")[1], t: v.currentTime, rs: v.readyState }));
+await p.screenshot({ path: shot });
+await p.uncheck(".musk-toggle input");
+const off = { count: await p.textContent('[data-testid="hit-count"]'), badges: await p.$$eval('[data-testid="spk-badge"]', x => x.map(e => e.textContent).reduce((a, k) => (a[k] = (a[k] || 0) + 1, a), {})) };
+console.log(JSON.stringify({ on, v, off, bad }, null, 1)); await b.close();
