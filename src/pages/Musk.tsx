@@ -1,10 +1,11 @@
 import { Bookmark, BookmarkCheck, Play, Search, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { go } from "../lib/router";
-import { clock, loadCorpus, search, type Corpus, type Hit } from "../musk/corpus";
+import { candidates, clock, findSentence, loadManifest, materialize, type Candidates, type Hit, type Manifest } from "../musk/corpus";
 import { ClipPlayer } from "../musk/ClipPlayer";
 import { useVocab, vocab } from "../musk/vocab";
 
+const PAGE = 60;
 const SUGGEST = ["look at", "fundamental", "wow", "actually", "physics", "I think"];
 
 interface Clip {
@@ -33,16 +34,18 @@ export function SpeakerBadge({ m, p }: { m: Hit["sentence"]["m"]; p: number | nu
 }
 
 export function MuskPage({ q: initial = "" }: { q?: string }) {
-  const [corpus, setCorpus] = useState<Corpus | null>(null);
+  const [corpus, setCorpus] = useState<Manifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState(initial);
   const [muskOnly, setMuskOnly] = useState(true);
   const [clip, setClip] = useState<Clip | null>(null);
+  const [limit, setLimit] = useState(PAGE);
+  const [res, setRes] = useState<{ cand: Candidates | null; hits: Hit[]; total: number; shown: number; hidden: number | null } | null>(null);
   const saved = useVocab();
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    loadCorpus().then(setCorpus, (e: Error) => setError(e.message));
+    loadManifest().then(setCorpus, (e: Error) => setError(e.message));
     input.current?.focus();
   }, []);
 
@@ -52,10 +55,40 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
     return () => clearTimeout(t);
   }, [q]);
 
-  const hasSpeaker = !!corpus && corpus.sentences.some((x) => x.m);
-  const all = useMemo(() => (corpus && q.trim() ? search(corpus, q) : []), [corpus, q]);
-  const hits = muskOnly ? all.filter((h) => h.sentence.m === "musk") : all;
-  const hidden = all.length - hits.length;
+  useEffect(() => setLimit(PAGE), [q, muskOnly]);
+  // Sharded search: postings first, then only the sentence chunks needed for the shown hits.
+  useEffect(() => {
+    const query = q.trim();
+    if (!corpus || !query) {
+      setRes(null);
+      return;
+    }
+    let live = true;
+    const t = setTimeout(async () => {
+      try {
+        const cand = await candidates(query);
+        const ids = cand ? (muskOnly ? cand.m : [...cand.m, ...cand.u, ...cand.n]) : [];
+        const hits = cand ? await materialize(cand.lemmas, ids.slice(0, limit)) : [];
+        let hidden: number | null = null;
+        if (cand && muskOnly) {
+          const rest = [...cand.u, ...cand.n];
+          hidden = rest.length <= 120 ? (await materialize(cand.lemmas, rest)).length : null;
+        }
+        if (live) setRes({ cand, hits, total: ids.length, shown: Math.min(limit, ids.length), hidden });
+      } catch (e) {
+        if (live) setError((e as Error).message);
+      }
+    }, 120);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [corpus, q, muskOnly, limit]);
+
+  const hasSpeaker = !!corpus && (corpus.labels.musk ?? 0) > 0;
+  const hits = res?.hits ?? [];
+  const more = !!res && res.total > res.shown;
+  const hidden = res?.hidden ?? 0;
   const videoCount = new Set(hits.map((h) => h.sentence.v)).size;
 
   const play = (h: Hit) => setClip({ hit: h, nonce: Date.now() });
@@ -86,7 +119,7 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
   return (
     <div className="page musk-page">
       <header className="musk-hero">
-        <p className="eyebrow">Musk Corpus · {corpus ? `${Object.keys(corpus.videos).length} 个视频 · ${corpus.sentences.length.toLocaleString()} 句` : "加载中"}</p>
+        <p className="eyebrow">Musk Corpus · {corpus ? `${Object.keys(corpus.videos).length} 个视频 · ${corpus.n.toLocaleString()} 句` : "加载中"}</p>
         <h1 className="display">他怎么说这个词？</h1>
         <label className="musk-search">
           <Search size={20} />
@@ -116,7 +149,8 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
             </div>
           ) : (
             <span className="musk-count" data-testid="hit-count">
-              {hits.length} 处 · {videoCount} 个视频
+              {hits.length}
+              {more ? "+" : ""} 处 · {videoCount} 个视频
               {muskOnly && hidden > 0 && <span className="musk-hidden"> · 另有 {hidden} 处未确认/非马斯克已隐藏</span>}
             </span>
           )}
@@ -166,7 +200,14 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
               </li>
             );
           })}
-          {q.trim() && corpus && !hits.length && <li className="musk-empty">语料里还没有 Musk 说过「{q.trim()}」。</li>}
+          {more && (
+            <li className="musk-more">
+              <button className="chip" onClick={() => setLimit((l) => l + PAGE)}>
+                显示更多
+              </button>
+            </li>
+          )}
+          {q.trim() && corpus && res && !hits.length && <li className="musk-empty">语料里还没有 Musk 说过「{q.trim()}」。</li>}
         </ol>
 
         {clip && (
@@ -191,8 +232,8 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
           <ul>
             {saved.map((s) => (
               <li key={s.id}>
-                <button className="musk-hit-main" onClick={() => {
-                    const si = corpus?.sentences.find((x) => x.v === s.videoId && x.t === s.sentence);
+                <button className="musk-hit-main" onClick={async () => {
+                    const si = await findSentence(s.videoId, s.start);
                     if (!si || !corpus) return;
                     const i = si.t.indexOf(s.phrase);
                     setClip({ hit: { id: `saved:${s.id}`, sentence: si, video: corpus.videos[si.v], start: s.start, end: s.end, from: Math.max(0, i), to: i < 0 ? 0 : i + s.phrase.length }, nonce: Date.now() });

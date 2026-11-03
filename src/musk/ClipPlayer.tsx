@@ -8,7 +8,7 @@ export function ClipPlayer({ sentence, from, to, nonce }: { sentence: Sentence; 
   const ref = useRef<HTMLVideoElement>(null);
   const [t, setT] = useState(-1);
   const clipStart = Math.max(0, sentence.s - PAD);
-  const src = sentence.c ? `${import.meta.env.BASE_URL}${sentence.c}` : null;
+  const src = sentence.c;
 
   useEffect(() => {
     const v = ref.current;

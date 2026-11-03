@@ -19,3 +19,7 @@ docs/assets/
 data/word-atlas.json
 data/word-atlas.csv
 PUBLIC_MANIFEST.json
+
+# clips live on Cloudflare R2 (musk-atlas-clips), never in git
+public/musk/clips/
+public/musk/corpus.json
