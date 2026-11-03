@@ -73,7 +73,7 @@ export const defaultSettings: Settings = {
   startLevel: 0,
   onboarded: false,
   dataset: "open",
-  ambience: "stars",
+  ambience: "off",
   ambienceVolume: 0.45,
   splash: true,
 };

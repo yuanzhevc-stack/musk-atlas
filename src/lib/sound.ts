@@ -47,7 +47,11 @@ function audio() {
   return ctx;
 }
 
+/** Musk Atlas ships no sound files (original sfx removed). */
+const SOUND_FILES = false;
+
 function load(file: string) {
+  if (!SOUND_FILES) return Promise.resolve(null);
   let p = buffers.get(file);
   if (!p) {
     const c = audio();
