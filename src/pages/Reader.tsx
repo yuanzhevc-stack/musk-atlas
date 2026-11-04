@@ -444,7 +444,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
                 />
               </div>
               <div className="rd-yt-bar">
-                <span className="rd-dim">如果视频要求验证，</span>
+                <span className="rd-dim">放不了或要验证？</span>
                 <a href={watchUrl(lesson.yt.v, video.t)} target="_blank" rel="noreferrer" data-testid="yt-out">
                   在 YouTube 打开 {clockOf(video.t)} <ExternalLink size={12} />
                 </a>
