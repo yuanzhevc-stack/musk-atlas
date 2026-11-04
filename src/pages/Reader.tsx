@@ -633,7 +633,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
               <div
                 key={cur}
                 ref={textRef}
-                className={`rd-text rd-sv-text ${tt.sid === cur ? "is-reading" : ""}`}
+                className="rd-text rd-sv-text"
                 style={{ fontSize: Math.round(size * 1.3) }}
                 data-testid="reader-text"
               >
