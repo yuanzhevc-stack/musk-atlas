@@ -9,29 +9,34 @@ import { MeaningList } from "../reader/Meanings";
 import { Rating, formatInterval, preview, type Grade } from "../store/srs";
 import { Sheet } from "../ui/Sheet";
 import { toast } from "../ui/Toast";
-import { StatusPicker, ToolTabs } from "./Reader";
+import { StatusPicker } from "./Reader";
 
-type Filter = "learning" | "phrase" | "review" | "known" | "ignored" | "all";
-const FILTERS: [Filter, string][] = [
-  ["learning", "学习中"],
+type Kind = "all" | Item["kind"];
+const KINDS: [Kind, string][] = [
+  ["all", "全部"],
+  ["word", "单词"],
   ["phrase", "短语"],
+  ["sentence", "句子"],
+];
+type Filter = "learning" | "review" | "known" | "ignored" | "all";
+const FILTERS: [Filter, string][] = [
+  ["all", "全部"],
+  ["learning", "学习中"],
   ["review", "复习"],
   ["known", "已知"],
   ["ignored", "忽略"],
-  ["all", "全部"],
 ];
 const match = (it: Item, f: Filter) =>
   f === "all"
     ? true
     : f === "learning"
       ? it.status >= 1 && it.status <= 4
-      : f === "phrase"
-        ? it.kind === "phrase" && it.status !== -1
-        : f === "review"
-          ? !!it.srs
-          : f === "known"
-            ? it.status === 5
-            : it.status === -1;
+      : f === "review"
+        ? !!it.srs
+        : f === "known"
+          ? it.status === 5
+          : it.status === -1;
+export const KIND_LABEL: Record<Item["kind"], string> = { word: "单词", phrase: "短语", sentence: "句子" };
 
 const statusText = (s: Item["status"]) => (s === 5 ? "已知" : s === -1 ? "忽略" : `${s}`);
 
@@ -39,21 +44,24 @@ export function CorpusPage() {
   const st = useReader();
   const musk = useVocab();
   const [q, setQ] = useState("");
-  const [filter, setFilter] = useState<Filter>("learning");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [kind, setKind] = useState<Kind>("all");
   const [sort, setSort] = useState<"recent" | "alpha" | "status">("recent");
   const [open, setOpen] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const file = useRef<HTMLInputElement>(null);
 
   const items = Object.values(st.items);
-  const counts = useMemo(() => Object.fromEntries(FILTERS.map(([f]) => [f, items.filter((it) => match(it, f)).length])), [items]);
+  const ofKind = useMemo(() => items.filter((it) => kind === "all" || it.kind === kind), [items, kind]);
+  const kindCounts = useMemo(() => Object.fromEntries(KINDS.map(([k]) => [k, items.filter((it) => k === "all" || it.kind === k).length])), [items]);
+  const counts = useMemo(() => Object.fromEntries(FILTERS.map(([f]) => [f, ofKind.filter((it) => match(it, f)).length])), [ofKind]);
   const due = items.filter((it) => it.srs && it.srs.due <= Date.now());
   const list = useMemo(() => {
     const n = q.trim().toLowerCase();
-    const out = items.filter((it) => match(it, filter) && (!n || it.key.includes(n) || it.meaning.toLowerCase().includes(n) || it.notes.toLowerCase().includes(n) || it.ctx?.sentence.toLowerCase().includes(n)));
+    const out = ofKind.filter((it) => match(it, filter) && (!n || it.key.includes(n) || it.meaning.toLowerCase().includes(n) || it.notes.toLowerCase().includes(n) || it.ctx?.sentence.toLowerCase().includes(n)));
     out.sort((a, b) => (sort === "alpha" ? a.key.localeCompare(b.key) : sort === "status" ? (a.status === -1 ? 9 : a.status) - (b.status === -1 ? 9 : b.status) || b.updated - a.updated : b.updated - a.updated));
     return out;
-  }, [items, q, filter, sort]);
+  }, [ofKind, q, filter, sort]);
 
   const newMusk = musk.filter((m) => !st.items[normalize(m.phrase)]);
   const importMusk = () => {
@@ -83,10 +91,10 @@ export function CorpusPage() {
     <div className="page rd-page">
       <header className="rd-head">
         <div>
-          <p className="rd-eyebrow">阅读</p>
-          <h1 className="rd-title">我的语料库</h1>
+          <p className="rd-eyebrow">语料</p>
+          <h1 className="rd-title">我的语料</h1>
         </div>
-        <ToolTabs on="corpus" />
+        <p className="rd-dim rd-head-meta">{items.length} 条 · 阅读和 Musk 里学到的词、短语、句子</p>
       </header>
 
       <div className="rd-toolbar">
@@ -109,6 +117,14 @@ export function CorpusPage() {
         </button>
       </div>
 
+      <div className="rd-tabs rd-kinds" role="tablist" data-testid="kind-tabs">
+        {KINDS.map(([k, label]) => (
+          <button key={k} className={kind === k ? "is-on" : ""} onClick={() => setKind(k)} role="tab" aria-selected={kind === k}>
+            {label} <small>{kindCounts[k]}</small>
+          </button>
+        ))}
+      </div>
+
       <div className="rd-filters" role="tablist">
         {FILTERS.map(([f, label]) => (
           <button key={f} className={filter === f ? "is-on" : ""} onClick={() => setFilter(f)} role="tab" aria-selected={filter === f}>
@@ -119,7 +135,7 @@ export function CorpusPage() {
 
       {!list.length ? (
         <div className="rd-empty rd-empty-lg">
-          <p>{items.length ? "没有匹配的条目" : "还没有词。去课程里点词、选短语，就会出现在这里。"}</p>
+          <p>{items.length ? "没有匹配的条目" : "还没有语料。去阅读里点词、选短语、存句子，就会出现在这里。"}</p>
           {!items.length && (
             <a className="rd-btn rd-btn-primary" href="#/reader">
               去阅读
@@ -173,7 +189,7 @@ function sourceHref(it: Item) {
   return `#/reader?l=${it.ctx.lesson}&s=${it.ctx.sid}`;
 }
 
-function CorpusRow({ it, open, onToggle }: { it: Item; open: boolean; onToggle: () => void }) {
+export function CorpusRow({ it, open, onToggle }: { it: Item; open: boolean; onToggle: () => void }) {
   const href = sourceHref(it);
   const s = it.ctx?.sentence ?? "";
   const at = s.toLowerCase().indexOf(it.text.toLowerCase());
@@ -184,10 +200,10 @@ function CorpusRow({ it, open, onToggle }: { it: Item; open: boolean; onToggle: 
         <span className="rd-row-body">
           <b>
             {it.text}
-            {it.kind === "phrase" && <em>短语</em>}
+            {it.kind !== "word" && <em>{KIND_LABEL[it.kind]}</em>}
           </b>
           <span className="rd-row-meaning">{it.meaning || <i className="rd-dim">无释义</i>}</span>
-          {s && (
+          {s && it.kind !== "sentence" && (
             <span className="rd-row-ctx">
               {at >= 0 ? (
                 <>
@@ -227,14 +243,14 @@ function CorpusRow({ it, open, onToggle }: { it: Item; open: boolean; onToggle: 
               <Trash2 size={15} />
             </button>
           </div>
-          <MuskSays q={it.key} compact />
+          {it.kind !== "sentence" && <MuskSays q={it.key} compact />}
         </div>
       )}
     </li>
   );
 }
 
-function ReviewSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ReviewSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const st = useReader();
   const [shown, setShown] = useState(false);
   const due = Object.values(st.items)

@@ -4168,3 +4168,6 @@ a:hover .mark-needle,
 .spk-uncertain { background: color-mix(in srgb, #c98a1b 16%, transparent); color: #9a6a12; }
 .spk-not_musk { background: color-mix(in srgb, var(--ink-2, #666) 12%, transparent); color: var(--ink-2, #666); }
 .musk-hidden { color: var(--ink-3, #999); font-size: 12px; }
+
+.musk-hit-acts { flex: none; display: flex; flex-direction: column; gap: 2px; }
+.keep-sent.is-on { color: var(--terra); }

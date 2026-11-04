@@ -1,18 +1,13 @@
-import { ArrowRight, Flame, Keyboard, Sparkles } from "lucide-react";
-import { useEffect, useMemo } from "react";
-import { prefetch, useAtlas, useEntry } from "../atlas/context";
-import { go, openWord } from "../lib/router";
-import { cue } from "../lib/sound";
-import { hashSeed } from "../lib/text";
-import { buildSession, masteredCount, todayPlan } from "../store/session";
-import { isMastered } from "../store/srs";
-import { dayKey, store, useStore } from "../store/store";
-import { Galaxy } from "../galaxy/Galaxy";
-import { Highlight, Pronounce } from "../ui/EntryView";
-import { Illustration } from "../ui/Illustration";
-import { Ring } from "../ui/Ring";
-
-const BRAND = `${import.meta.env.BASE_URL}brand`;
+/** 今日 — built only from my own 语料 (reader + Musk): today's FSRS reviews, what I saved today, and a few to revisit. */
+import { ArrowRight, BookOpenText, GraduationCap, Pause, Play } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ClipPlayer } from "../musk/ClipPlayer";
+import { clock, sentence as loadSentence, type Sentence } from "../musk/corpus";
+import { reader, useReader, type Item } from "../reader/model";
+import { muskLookup } from "../reader/MuskSays";
+import { formatInterval } from "../store/srs";
+import { dayKey } from "../store/store";
+import { KIND_LABEL, ReviewSheet } from "./Corpus";
 
 function greeting(h: number) {
   if (h < 5) return "夜深了";
@@ -22,6 +17,7 @@ function greeting(h: number) {
   return "晚上好";
 }
 
+/** Kept for 我的 (word-atlas streak). */
 export function streakOf(days: Record<string, { r: number }>) {
   let n = 0;
   const d = new Date();
@@ -33,312 +29,215 @@ export function streakOf(days: Record<string, { r: number }>) {
   return n;
 }
 
+const statusText = (s: Item["status"]) => (s === 5 ? "已知" : s === -1 ? "忽略" : `${s}`);
+
 export function Today() {
-  const atlas = useAtlas();
-  const progress = useStore((s) => s.progress);
-  const settings = useStore((s) => s.settings);
-  const plan = useMemo(() => todayPlan(atlas, progress, settings), [atlas, progress, settings]);
-  // Warm the first cards of today's journey so the session opens instantly.
-  const firstIds = [...plan.due.slice(0, 4), ...plan.fresh.slice(0, 6)].join(",");
-  useEffect(() => {
-    const ids = firstIds.split(",").filter(Boolean);
-    const t = window.setTimeout(() => void prefetch(atlas, ids), 800);
-    return () => window.clearTimeout(t);
-  }, [atlas, firstIds]);
+  const st = useReader();
+  const [reviewing, setReviewing] = useState(false);
   const now = new Date();
-  const today = progress.days[dayKey()];
-  const streak = streakOf(progress.days);
-  const active = progress.session && !progress.session.finished ? progress.session : null;
-  const total = plan.due.length + plan.fresh.length;
-  const goal = settings.dailyNew + Math.min(plan.due.length, 60);
-  const doneToday = today?.r ?? 0;
-
-  const start = (opts?: { reviewOnly?: boolean; extra?: number }) => {
-    if (!active) {
-      const s = buildSession(atlas, progress, opts?.extra ? { ...settings, dailyNew: (today?.n ?? 0) + opts.extra } : settings, { reviewOnly: opts?.reviewOnly });
-      if (!s.steps.length) return;
-      store.progress((p) => ({ ...p, session: s }));
-    }
-    if (settings.sfx) void cue("start");
-    go({ page: "learn" });
-  };
-
-  const week = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    const k = dayKey(d);
-    return { k, label: "日一二三四五六"[d.getDay()], v: progress.days[k]?.r ?? 0, today: i === 6 };
-  });
-
-  const learned = Object.keys(progress.cards).length;
-  const mastered = masteredCount(progress);
-  const teaser = (active ? active.newIds : plan.fresh).slice(0, 5).map((id) => atlas.byId.get(id)!).filter(Boolean);
+  const t = Date.now();
+  const today = dayKey(now);
+  const all = Object.values(st.items).filter((it) => it.status !== -1 && !(it.status === 5 && !it.srs && it.kind === "word" && !it.meaning && !it.ctx));
+  const due = all.filter((it) => it.srs && it.srs.due <= t).sort((a, b) => a.srs!.due - b.srs!.due);
+  const inReview = all.filter((it) => it.srs);
+  const nextDue = inReview.filter((it) => it.srs!.due > t).sort((a, b) => a.srs!.due - b.srs!.due)[0];
+  const fresh = all.filter((it) => dayKey(new Date(it.created)) === today).sort((a, b) => b.created - a.created);
+  const learning = all.filter((it) => it.status >= 1 && it.status <= 4);
+  const freshKeys = new Set(fresh.map((it) => it.key));
+  const dueKeys = new Set(due.map((it) => it.key));
+  // Revisit: learning items not already shown, least recently touched first.
+  const revisit = learning.filter((it) => !freshKeys.has(it.key) && !dueKeys.has(it.key)).sort((a, b) => a.updated - b.updated).slice(0, 5);
+  const notInReview = learning.filter((it) => !it.srs);
 
   return (
-    <div className="page today">
-      <header className="greet">
-        <p className="eyebrow">
-          {now.getMonth() + 1}月{now.getDate()}日 · 星期{"日一二三四五六"[now.getDay()]}
-        </p>
-        <h1 className="display">{greeting(now.getHours())}，探索者。</h1>
+    <div className="page rd-page td-page" data-testid="today">
+      <header className="rd-head">
+        <div>
+          <p className="rd-eyebrow">
+            {now.getMonth() + 1}月{now.getDate()}日 · 星期{"日一二三四五六"[now.getDay()]}
+          </p>
+          <h1 className="rd-title">{greeting(now.getHours())}</h1>
+        </div>
       </header>
 
-      <section className={`journey ${total === 0 && !active ? "is-clear" : ""}`}>
-        <img className="journey-art" src={`${BRAND}/hero.webp`} alt="" fetchPriority="high" />
-        <div className="journey-body">
-          {active ? (
-            <>
-              <p className="eyebrow eyebrow-light">旅程进行中</p>
-              <h2>
-                还剩 <b>{active.steps.length - active.index}</b> 步
-              </h2>
-              <p className="journey-lede">进度已保存，随时接着走。</p>
-            </>
-          ) : total > 0 ? (
-            <>
-              <p className="eyebrow eyebrow-light">今日旅程</p>
-              <h2>
-                {plan.due.length > 0 && (
-                  <>
-                    复习 <b>{plan.due.length}</b>
-                  </>
-                )}
-                {plan.due.length > 0 && plan.fresh.length > 0 && <i> · </i>}
-                {plan.fresh.length > 0 && (
-                  <>
-                    新词 <b>{plan.fresh.length}</b>
-                  </>
-                )}
-              </h2>
-              <p className="journey-lede">约 {plan.minutes} 分钟。先温故，再知新。</p>
-            </>
-          ) : (
-            <>
-              <p className="eyebrow eyebrow-light">今日已完成</p>
-              <h2>今天的星，都亮了。</h2>
-              <p className="journey-lede">记忆需要一点留白。想多走一段，也可以。</p>
-            </>
-          )}
-          {teaser.length > 0 && (
-            <div className="teaser" aria-label="今天将遇见的新词">
-              {teaser.map((w, i) => (
-                <Illustration key={w.id} src={atlas.img(w, "thumb")} word={w.word} topic={w.topic} className={`teaser-${i}`} />
-              ))}
-              <span>今天会遇见它们</span>
-            </div>
-          )}
-          <div className="journey-actions">
-            {active || total > 0 ? (
-              <button className="btn btn-primary btn-xl" onClick={() => start()}>
-                {active ? "继续旅程" : "开始今天的旅程"} <ArrowRight size={20} />
-              </button>
-            ) : (
-              <button className="btn btn-primary btn-xl" onClick={() => start({ extra: 5 })}>
-                再认识 5 个新词 <Sparkles size={18} />
-              </button>
-            )}
-            {!active && plan.due.length > 0 && plan.fresh.length > 0 && (
-              <button className="btn btn-glass" onClick={() => start({ reviewOnly: true })}>
-                只复习
-              </button>
-            )}
-            {!active && total === 0 && (
-              <button className="btn btn-glass" onClick={() => go({ page: "practice" })}>
-                <Keyboard size={18} /> 打字练习
-              </button>
-            )}
+      {!all.length ? (
+        <section className="td-empty" data-testid="today-empty">
+          <BookOpenText size={30} />
+          <h2>还没有语料</h2>
+          <p>在阅读里点词、选短语、存句子，它们会每天出现在这里。</p>
+          <div>
+            <a className="rd-btn rd-btn-primary" href="#/reader">
+              去阅读 <ArrowRight size={15} />
+            </a>
+            <a className="rd-btn" href="#/">
+              去 Musk
+            </a>
           </div>
-        </div>
-      </section>
-
-      <div className="today-grid">
-        <WordOfDay />
-
-        <section className="panel streak-panel">
-          <div className="panel-head">
-            <h3 className="eyebrow">这一周</h3>
-            <span className={`streak ${streak ? "is-on" : ""}`}>
-              <Flame size={16} /> 连续 {streak} 天
-            </span>
-          </div>
-          <div className="streak-body">
-            <Ring value={goal ? doneToday / goal : 0} size={112} stroke={8} tone="terra">
-              <b>{doneToday}</b>
-              <small>今日答题</small>
-            </Ring>
-            <ol className="week">
-              {week.map((d) => (
-                <li key={d.k} className={`${d.v ? "is-on" : ""} ${d.today ? "is-today" : ""}`} title={`${d.k}：${d.v} 题`}>
-                  <span style={{ "--h": Math.min(1, d.v / 40) } as React.CSSProperties} />
-                  <small>{d.label}</small>
-                </li>
-              ))}
-            </ol>
-          </div>
-          <dl className="mini-stats">
-            <div>
-              <dt>已点亮</dt>
-              <dd>{learned.toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt>已掌握</dt>
-              <dd>{mastered.toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt>全部词汇</dt>
-              <dd>{atlas.count.toLocaleString()}</dd>
-            </div>
-          </dl>
         </section>
+      ) : (
+        <>
+          <div className="td-stats" data-testid="today-stats">
+            <Stat n={due.length} label="待复习" />
+            <Stat n={fresh.length} label="今天新增" />
+            <Stat n={learning.length} label="学习中" />
+            <Stat n={all.length} label="语料" href="#/corpus" />
+          </div>
 
-        <LevelPath />
-        <GalaxyPanel learned={learned} total={atlas.count} />
-        <Topics />
-      </div>
+          <section className={`td-review ${due.length ? "" : "is-clear"}`} data-testid="today-review">
+            <div>
+              <p className="rd-eyebrow">今日复习</p>
+              {due.length ? (
+                <h2>
+                  <b>{due.length}</b> 条到期
+                </h2>
+              ) : inReview.length ? (
+                <h2>今天复习完了</h2>
+              ) : (
+                <h2>还没有加入复习</h2>
+              )}
+              <p className="rd-dim">
+                {due.length
+                  ? "先回忆，再看释义和 Musk 原声。"
+                  : nextDue
+                    ? `下一条 ${formatInterval(nextDue.srs!.due - t)}后`
+                    : notInReview.length
+                      ? `${notInReview.length} 条学习中的语料可以加入复习`
+                      : "在语料里点「加入复习」"}
+              </p>
+            </div>
+            {due.length ? (
+              <button className="rd-btn rd-btn-primary" onClick={() => setReviewing(true)} data-testid="today-review-start">
+                <GraduationCap size={16} /> 开始复习
+              </button>
+            ) : notInReview.length ? (
+              <button className="rd-btn" onClick={() => notInReview.forEach((it) => reader.addToReview(it.key))} data-testid="today-add-review">
+                全部加入复习
+              </button>
+            ) : null}
+          </section>
+
+          {due.length > 0 && <Group title="到期" items={due.slice(0, 6)} more={due.length - 6} testid="today-due" />}
+          <Group title="今天新增" items={fresh.slice(0, 8)} more={fresh.length - 8} testid="today-fresh" empty="今天还没存新语料。去阅读点几个词吧。" />
+          {revisit.length > 0 && <Group title="再看看" sub="学习中 · 最久没碰" items={revisit} testid="today-revisit" />}
+        </>
+      )}
+      <ReviewSheet open={reviewing} onClose={() => setReviewing(false)} />
     </div>
   );
 }
 
-function GalaxyPanel({ learned, total }: { learned: number; total: number }) {
-  const today = useStore((s) => s.progress.days[dayKey()]);
-  const ids = useStore((s) => s.progress.cards);
-  const todayIds = useMemo(() => {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    return Object.entries(ids)
-      .filter(([, c]) => c.seen >= start.getTime())
-      .map(([id]) => id);
-  }, [ids]);
-  void today;
+function Stat({ n, label, href }: { n: number; label: string; href?: string }) {
+  const body = (
+    <>
+      <b>{n}</b>
+      <span>{label}</span>
+    </>
+  );
+  return href ? (
+    <a className="td-stat" href={href}>
+      {body}
+    </a>
+  ) : (
+    <div className="td-stat">{body}</div>
+  );
+}
+
+function Group({ title, sub, items, more = 0, testid, empty }: { title: string; sub?: string; items: Item[]; more?: number; testid: string; empty?: string }) {
   return (
-    <section className="galaxy-panel" onClick={() => go({ page: "atlas", view: "galaxy" })} role="link" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && go({ page: "atlas", view: "galaxy" })}>
-      <Galaxy mode="mini" highlight={todayIds} />
-      <div className="galaxy-panel-copy">
-        <p className="eyebrow eyebrow-light">你的词汇星图</p>
-        <h3>
-          已点亮 <b>{learned.toLocaleString()}</b> 颗星
-        </h3>
-        <p>{learned ? `还有 ${(total - learned).toLocaleString()} 颗在等你。金色是今天新点亮的。` : `${total.toLocaleString()} 个词是 ${total.toLocaleString()} 颗星。学会一个，就点亮一颗。`}</p>
-        <span className="btn btn-glass">
-          进入星图 <ArrowRight size={18} />
-        </span>
-      </div>
+    <section className="td-group" data-testid={testid}>
+      <header>
+        <h3>{title}</h3>
+        {sub && <span className="rd-dim">{sub}</span>}
+        <a className="rd-link" href="#/corpus">
+          {more > 0 ? `还有 ${more} 条 ›` : "语料 ›"}
+        </a>
+      </header>
+      {!items.length ? <p className="rd-dim td-none">{empty}</p> : (
+        <ul className="td-list">
+          {items.map((it) => (
+            <TodayCard key={it.key} it={it} />
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
 
-function WordOfDay() {
-  const atlas = useAtlas();
-  const pick = useMemo(() => {
-    const pool = atlas.words.filter((w) => w.cefr >= 2 && w.media & 1);
-    const list = pool.length ? pool : atlas.words;
-    return list[hashSeed(dayKey()) % list.length];
-  }, [atlas]);
-  const { entry } = useEntry(pick?.id);
-  if (!pick) return null;
+function sourceHref(it: Item) {
+  if (!it.ctx) return null;
+  if (it.ctx.musk) return `#/?q=${encodeURIComponent(it.kind === "sentence" ? it.text.split(/\s+/).slice(0, 4).join(" ") : it.key)}`;
+  return `#/reader?l=${it.ctx.lesson}&s=${it.ctx.sid}`;
+}
+
+function TodayCard({ it }: { it: Item }) {
+  const s = it.kind === "sentence" ? "" : (it.ctx?.sentence ?? "");
+  const at = s.toLowerCase().indexOf(it.text.toLowerCase());
+  const href = sourceHref(it);
   return (
-    <section className="panel wotd" onClick={() => openWord(pick.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && openWord(pick.id)} aria-label={`今日一词：${pick.word}`}>
-      <Illustration src={atlas.img(pick)} word={pick.word} topic={pick.topic} className="wotd-art" />
-      <div className="wotd-body">
-        <h3 className="eyebrow">今日一词</h3>
-        <p className="wotd-word" lang="en">
-          {pick.word}
+    <li className={`td-card kind-${it.kind}`} data-testid="today-card">
+      <div className="td-card-head">
+        <b className="td-text">{it.text}</b>
+        <span className={`rd-pill st-${it.status}`}>{statusText(it.status)}</span>
+        {it.kind !== "word" && <em className="td-kind">{KIND_LABEL[it.kind]}</em>}
+      </div>
+      {it.meaning && <p className="td-meaning">{it.meaning}</p>}
+      {s && (
+        <p className="td-ctx">
+          {at >= 0 ? (
+            <>
+              {s.slice(0, at)}
+              <mark>{s.slice(at, at + it.text.length)}</mark>
+              {s.slice(at + it.text.length)}
+            </>
+          ) : (
+            s
+          )}
         </p>
-        {entry && (
-          <div onClick={(e) => e.stopPropagation()}>
-            <Pronounce entry={entry} refw={pick} />
-          </div>
-        )}
-        <p className="wotd-zh">{pick.zh}</p>
-        {entry?.ex[0] && (
-          <p className="wotd-ex" lang="en">
-            <Highlight text={entry.ex[0].en} word={entry.w} />
-          </p>
-        )}
-      </div>
-    </section>
+      )}
+      <MuskClip it={it} />
+      {href && (
+        <a className="td-src" href={href}>
+          {it.ctx?.musk ? `Musk · ${it.ctx.title.slice(0, 28)} · ${clock(it.ctx.musk.t)}` : `《${it.ctx!.title.slice(0, 24)}》`}
+        </a>
+      )}
+    </li>
   );
 }
 
-function LevelPath() {
-  const atlas = useAtlas();
-  const cards = useStore((s) => s.progress.cards);
-  const start = useStore((s) => s.settings.startLevel);
-  const levels = useMemo(() => {
-    const out = atlas.cefr.map((name) => ({ name, total: 0, seen: 0, mastered: 0 }));
-    for (const w of atlas.words) {
-      const l = out[w.cefr];
-      l.total++;
-      const c = cards[w.id];
-      if (c) {
-        l.seen++;
-        if (isMastered(c)) l.mastered++;
-      }
-    }
-    return out;
-  }, [atlas, cards]);
-  const NAMES = ["入门", "基础", "进阶", "中高", "高级", "精通"];
+/** First "Musk 怎么说" clip for the item, when the corpus has one. Sentences saved from Musk replay their own clip. */
+function MuskClip({ it }: { it: Item }) {
+  const [hit, setHit] = useState<{ s: Sentence; from: number; to: number; title: string } | null | undefined>(undefined);
+  const [on, setOn] = useState(0);
+  useEffect(() => {
+    let live = true;
+    setHit(undefined);
+    const p =
+      it.kind === "sentence"
+        ? it.ctx?.musk
+          ? loadSentence(it.ctx.sid).then((s) => (s && s.c ? { s, from: -1, to: -1, title: it.ctx!.title } : null))
+          : Promise.resolve(null)
+        : muskLookup(it.key, 1).then((r) => (r.hits[0] ? { s: r.hits[0].sentence, from: r.hits[0].from, to: r.hits[0].to, title: r.hits[0].video?.title ?? "" } : null));
+    p.then((h) => live && setHit(h), () => live && setHit(null));
+    return () => {
+      live = false;
+    };
+  }, [it.key, it.kind, it.ctx]);
+  const preview = useMemo(() => (hit ? hit.s.t : ""), [hit]);
+  if (!hit) return null;
   return (
-    <section className="panel path-panel">
-      <div className="panel-head">
-        <h3 className="eyebrow">学习路线 · 从 A1 到 C2</h3>
-        <span className="legend">
-          <i className="lg-seen" /> 已学 <i className="lg-done" /> 已掌握
+    <div className={`td-musk ${on ? "is-on" : ""}`} data-testid="today-musk">
+      <button className="td-musk-btn" onClick={() => setOn(on ? 0 : Date.now())} data-testid="today-musk-play">
+        <span className="rd-play">{on ? <Pause size={11} fill="currentColor" /> : <Play size={11} fill="currentColor" />}</span>
+        <span>
+          <small>Musk 怎么说</small>
+          {!on && <span className="td-musk-line">{preview}</span>}
         </span>
-      </div>
-      <ol className="route">
-        {levels.map((l, i) => {
-          const seen = l.seen / Math.max(1, l.total);
-          const done = l.mastered / Math.max(1, l.total);
-          return (
-            <li key={l.name} className={`${i === start ? "is-start" : ""} ${l.seen ? "is-on" : ""}`}>
-              <button onClick={() => go({ page: "atlas", level: l.name })} aria-label={`${l.name} ${NAMES[i]}，已学 ${l.seen} / ${l.total}`}>
-                <span className="station" style={{ "--seen": seen, "--done": done } as React.CSSProperties}>
-                  <b>{l.name}</b>
-                </span>
-                <span className="station-name">{NAMES[i]}</span>
-                <span className="station-count">
-                  {l.seen}
-                  <small>/{l.total}</small>
-                </span>
-                {i === start && <span className="station-flag">起点</span>}
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-    </section>
-  );
-}
-
-function Topics() {
-  const atlas = useAtlas();
-  const counts = useMemo(() => {
-    const c = new Array(atlas.topics.length).fill(0);
-    atlas.words.forEach((w) => c[w.topic]++);
-    return c;
-  }, [atlas]);
-  return (
-    <section className="topics-panel">
-      <div className="panel-head">
-        <h3 className="eyebrow">按雅思话题探索</h3>
-        <button className="link" onClick={() => go({ page: "atlas" })}>
-          打开图鉴
-        </button>
-      </div>
-      <ul className="topic-tiles">
-        {atlas.topics.map(([key, name], i) => (
-          <li key={key}>
-            <button onClick={() => go({ page: "atlas", topic: key })}>
-              <img src={`${BRAND}/topic-${key}.webp`} alt="" loading="lazy" onError={(e) => (e.currentTarget.style.visibility = "hidden")} />
-              <span>
-                <b>{name}</b>
-                <small>{counts[i]} 个词</small>
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </section>
+      </button>
+      {on > 0 && (
+        <div className="rd-musk-stage">
+          <ClipPlayer sentence={hit.s} from={hit.from} to={hit.to} nonce={on} title={hit.title} />
+        </div>
+      )}
+    </div>
   );
 }

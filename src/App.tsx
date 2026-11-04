@@ -1,4 +1,4 @@
-import { AudioLines, BookOpen, BookOpenText, ChevronLeft, ChevronRight, Compass, Github, Keyboard, Moon, Search, Sun, User } from "lucide-react";
+import { AudioLines, BookMarked, BookOpen, BookOpenText, ChevronLeft, ChevronRight, Compass, Github, Keyboard, Moon, Search, Sun, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { AtlasContext, useAtlas, useEntry } from "./atlas/context";
 import { loadOpenAtlas, loadPrivateAtlas } from "./atlas/data";
@@ -29,13 +29,14 @@ import { Toasts } from "./ui/Toast";
 const NAV: { page: Route["page"]; label: string; icon: typeof Compass }[] = [
   { page: "musk", label: "Musk", icon: AudioLines },
   { page: "reader", label: "阅读", icon: BookOpenText },
+  { page: "corpus", label: "语料", icon: BookMarked },
   { page: "today", label: "今日", icon: Compass },
   { page: "atlas", label: "图鉴", icon: BookOpen },
   { page: "practice", label: "练习", icon: Keyboard },
   { page: "me", label: "我的", icon: User },
 ];
 
-const navOn = (cur: Route["page"], page: Route["page"]) => cur === page || (page === "reader" && cur === "corpus");
+const navOn = (cur: Route["page"], page: Route["page"]) => cur === page;
 
 function useTheme() {
   const theme = useStore((s) => s.settings.theme);
@@ -207,7 +208,7 @@ function Shell({ privateAvailable }: { privateAvailable: boolean }) {
 
       <WordSheet id={word} />
       <Palette open={palette} onClose={() => setPalette(false)} />
-      {!onboarded && route.page !== "about" && route.page !== "musk" && route.page !== "reader" && route.page !== "corpus" && !splash && <Onboarding />}
+      {!onboarded && route.page !== "about" && route.page !== "musk" && route.page !== "reader" && route.page !== "corpus" && route.page !== "today" && !splash && <Onboarding />}
       {splash && <Splash onDone={() => setSplash(false)} />}
       <Toasts />
       <AmbienceController />

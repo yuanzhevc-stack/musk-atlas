@@ -4,7 +4,7 @@ import { go } from "../lib/router";
 import { candidates, clock, sentence, findSentence, loadManifest, materialize, type Candidates, type Hit, type Manifest } from "../musk/corpus";
 import { ClipPlayer } from "../musk/ClipPlayer";
 import { useVocab, vocab } from "../musk/vocab";
-import { CorpusChip } from "../reader/CorpusChip";
+import { CorpusChip, KeepSentence } from "../reader/CorpusChip";
 import { MuskText } from "../reader/MuskText";
 import { gsel } from "../reader/select";
 
@@ -196,6 +196,7 @@ export function MuskPage({ q: initial = "", c }: { q?: string; c?: string }) {
                     </span>
                   </span>
                 </button>
+                <span className="musk-hit-acts">
                 <button
                   className="icon-btn"
                   aria-label={isSaved ? "移出语料本" : "加入语料本"}
@@ -206,6 +207,8 @@ export function MuskPage({ q: initial = "", c }: { q?: string; c?: string }) {
                 >
                   {isSaved ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
                 </button>
+                <KeepSentence hit={h} />
+                </span>
               </li>
             );
           })}

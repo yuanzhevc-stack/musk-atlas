@@ -26,7 +26,7 @@ export interface Context {
 export interface Item {
   key: string;
   text: string;
-  kind: "word" | "phrase";
+  kind: "word" | "phrase" | "sentence";
   status: Status;
   meaning: string;
   notes: string;
@@ -116,6 +116,17 @@ export const reader = {
   },
   setStatus(text: string, status: Status, ctx?: Context) {
     return this.upsert(text, { status }, ctx);
+  },
+  /** Bookmark a whole sentence (kind 句子); toggles. Returns true when saved. */
+  toggleSentence(text: string, ctx?: Context) {
+    const key = normalize(text);
+    if (!key) return false;
+    if (state.items[key]?.kind === "sentence") {
+      this.remove(key);
+      return false;
+    }
+    this.upsert(text, { kind: "sentence", status: 1 }, ctx);
+    return true;
   },
   /** Back to blue: delete the item. */
   remove(key: string) {

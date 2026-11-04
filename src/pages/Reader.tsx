@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, ExternalLink, Pause, Play, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Bookmark, Check, ChevronLeft, ChevronRight, ExternalLink, Pause, Play, Plus, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { go } from "../lib/router";
 import { speak } from "../reader/dict";
@@ -20,19 +20,6 @@ With first principles, you boil things down to the most fundamental truths you c
 So the question is: why is it so expensive? It's not that people are stupid. It's just that the industry got stuck doing things the way they had always been done. If you want to make a big change, you have to actually look at the problem and figure out what's true.`,
 };
 
-export function ToolTabs({ on }: { on: "reader" | "corpus" }) {
-  return (
-    <div className="rd-tabs" role="tablist">
-      <a href="#/reader" className={on === "reader" ? "is-on" : ""} role="tab" aria-selected={on === "reader"}>
-        课程
-      </a>
-      <a href="#/corpus" className={on === "corpus" ? "is-on" : ""} role="tab" aria-selected={on === "corpus"}>
-        语料库
-      </a>
-    </div>
-  );
-}
-
 export function ReaderPage({ l, s }: { l?: string; s?: string }) {
   const st = useReader();
   const lesson = l ? st.lessons.find((x) => x.id === l) : undefined;
@@ -52,7 +39,6 @@ function Library({ missing }: { missing: boolean }) {
           <p className="rd-eyebrow">阅读</p>
           <h1 className="rd-title">课程</h1>
         </div>
-        <ToolTabs on="reader" />
       </header>
       {missing && <p className="rd-dim">这节课不在这台设备上（数据存在本机浏览器）。</p>}
       <div className="rd-lib">
@@ -408,6 +394,25 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
                   >
                     {tt.sid === g[0].sid ? <Pause size={10} fill="currentColor" /> : <Play size={10} fill="currentColor" />}
                   </button>
+                  {(() => {
+                    const text = doc.sentences[g[0].sid];
+                    if (normalize(text).split(" ").length < 2) return null;
+                    const on = st.items[normalize(text)]?.kind === "sentence";
+                    return (
+                      <button
+                        className={`rd-keep ${on ? "is-on" : ""}`}
+                        onClick={() => {
+                          const saved = reader.toggleSentence(text, { lesson: lesson.id, title: lesson.title, sid: g[0].sid, sentence: text });
+                          toast(saved ? "已存为句子" : "已移出语料", "ok");
+                        }}
+                        aria-label={on ? "移出语料" : "存这句到语料"}
+                        title={on ? "移出语料" : "存这句"}
+                        data-testid="keep"
+                      >
+                        <Bookmark size={10} fill={on ? "currentColor" : "none"} />
+                      </button>
+                    );
+                  })()}
                 {g.map((t) => {
                   const ph = phraseAt.get(t.i);
                   const inSel = !!sel && t.i >= sel.from && t.i <= sel.to;
