@@ -1,5 +1,6 @@
-import { Download, GraduationCap, Search, Trash2, Upload, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { Check, CornerUpLeft, Download, GraduationCap, MoreHorizontal, PenLine, Search, Trash2, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CorpusPlay } from "../reader/CorpusPlay";
 import { clock } from "../musk/corpus";
 import { useVocab } from "../musk/vocab";
 import { normalize, reader, useReader, type Item } from "../reader/model";
@@ -9,7 +10,6 @@ import { MeaningList } from "../reader/Meanings";
 import { Rating, formatInterval, preview, type Grade } from "../store/srs";
 import { Sheet } from "../ui/Sheet";
 import { toast } from "../ui/Toast";
-import { StatusPicker } from "./Reader";
 
 type Kind = "all" | Item["kind"];
 const KINDS: [Kind, string][] = [
@@ -49,6 +49,7 @@ export function CorpusPage() {
   const [sort, setSort] = useState<"recent" | "alpha" | "status">("recent");
   const [open, setOpen] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [replay, setReplay] = useState(0);
   const file = useRef<HTMLInputElement>(null);
 
   const items = Object.values(st.items);
@@ -62,6 +63,30 @@ export function CorpusPage() {
     out.sort((a, b) => (sort === "alpha" ? a.key.localeCompare(b.key) : sort === "status" ? (a.status === -1 ? 9 : a.status) - (b.status === -1 ? 9 : b.status) || b.updated - a.updated : b.updated - a.updated));
     return out;
   }, [ofKind, q, filter, sort]);
+
+  // Musk-page style keys: ↓/↑ open next/prev row (autoplays), Enter replays.
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.metaKey || e.ctrlKey || e.altKey || reviewing) return;
+      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable || document.querySelector(".cp-pop, .sheet-root")) return;
+      const shown = list.slice(0, 400);
+      if (!shown.length) return;
+      const i = shown.findIndex((x) => x.key === open);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const n = shown[Math.min(shown.length - 1, Math.max(0, i < 0 ? 0 : i + (e.key === "ArrowDown" ? 1 : -1)))];
+        setOpen(n.key);
+        requestAnimationFrame(() => document.querySelector(`[data-key="${CSS.escape(n.key)}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+      } else if (e.key === "Enter" && t.tagName !== "BUTTON" && t.tagName !== "A") {
+        e.preventDefault();
+        if (i < 0) setOpen(shown[0].key);
+        else setReplay(Date.now());
+      }
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  });
 
   const newMusk = musk.filter((m) => !st.items[normalize(m.phrase)]);
   const importMusk = () => {
@@ -145,7 +170,7 @@ export function CorpusPage() {
       ) : (
         <ul className="rd-list" data-testid="corpus-list">
           {list.slice(0, 400).map((it) => (
-            <CorpusRow key={it.key} it={it} open={open === it.key} onToggle={() => setOpen(open === it.key ? null : it.key)} />
+            <CorpusRow key={it.key} it={it} open={open === it.key} replay={open === it.key ? replay : 0} onToggle={() => setOpen(open === it.key ? null : it.key)} />
           ))}
         </ul>
       )}
@@ -189,21 +214,85 @@ function sourceHref(it: Item) {
   return `#/reader?l=${it.ctx.lesson}&s=${it.ctx.sid}`;
 }
 
-export function CorpusRow({ it, open, onToggle }: { it: Item; open: boolean; onToggle: () => void }) {
+const STATUSES: [Item["status"], string][] = [
+  [1, "新"],
+  [2, "认得"],
+  [3, "熟悉"],
+  [4, "掌握"],
+  [5, "已知"],
+  [-1, "忽略"],
+];
+
+/** Small Apple-style popover anchored inside the row; closes on outside tap / Esc. */
+function Pop({ onClose, className = "", children }: { onClose: () => void; className?: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const down = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && onClose();
+    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const t = setTimeout(() => document.addEventListener("pointerdown", down), 0);
+    document.addEventListener("keydown", key);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("pointerdown", down);
+      document.removeEventListener("keydown", key);
+    };
+  }, [onClose]);
+  return (
+    <div ref={ref} className={`cp-pop ${className}`} role="menu">
+      {children}
+    </div>
+  );
+}
+
+export function CorpusRow({ it, open, onToggle, replay = 0 }: { it: Item; open: boolean; onToggle: () => void; replay?: number }) {
   const href = sourceHref(it);
   const s = it.ctx?.sentence ?? "";
   const at = s.toLowerCase().indexOf(it.text.toLowerCase());
+  const [menu, setMenu] = useState<"status" | "more" | null>(null);
+  const [editing, setEditing] = useState(false);
+  const close = useCallback(() => setMenu(null), []);
   return (
-    <li className={`rd-row ${open ? "is-open" : ""}`} data-testid="corpus-row">
-      <button className="rd-row-main" onClick={onToggle}>
-        <span className={`rd-pill st-${it.status}`}>{statusText(it.status)}</span>
-        <span className="rd-row-body">
+    <li className={`rd-row ${open ? "is-open" : ""}`} data-testid="corpus-row" data-key={it.key}>
+      <div className="rd-row-main cp-main">
+        <span className="cp-anchor">
+          <button
+            className={`rd-pill st-${it.status} cp-pill`}
+            onClick={() => setMenu(menu === "status" ? null : "status")}
+            aria-haspopup="menu"
+            aria-expanded={menu === "status"}
+            aria-label={`等级 ${statusText(it.status)}，点按修改`}
+            data-testid="row-status"
+          >
+            {statusText(it.status)}
+          </button>
+          {menu === "status" && (
+            <Pop onClose={close} className="cp-pop-status">
+              {STATUSES.map(([v, l]) => (
+                <button
+                  key={v}
+                  role="menuitemradio"
+                  aria-checked={it.status === v}
+                  className={`st-${v} ${it.status === v ? "is-on" : ""}`}
+                  onClick={() => {
+                    reader.upsert(it.text, { status: v });
+                    setMenu(null);
+                  }}
+                  data-testid="status-opt"
+                >
+                  <b>{v === 5 ? <Check size={15} /> : v === -1 ? <X size={15} /> : v}</b>
+                  <small>{l}</small>
+                </button>
+              ))}
+            </Pop>
+          )}
+        </span>
+        <button className="rd-row-body cp-body" onClick={onToggle} aria-expanded={open} data-testid="row-open">
           <b>
             {it.text}
             {it.kind !== "word" && <em>{KIND_LABEL[it.kind]}</em>}
           </b>
           <span className="rd-row-meaning">{it.meaning || <i className="rd-dim">无释义</i>}</span>
-          {s && it.kind !== "sentence" && (
+          {s && it.kind !== "sentence" && !open && (
             <span className="rd-row-ctx">
               {at >= 0 ? (
                 <>
@@ -216,36 +305,70 @@ export function CorpusRow({ it, open, onToggle }: { it: Item; open: boolean; onT
               )}
             </span>
           )}
+        </button>
+        <span className="cp-anchor">
+          <button className="rd-icon cp-more" onClick={() => setMenu(menu === "more" ? null : "more")} aria-haspopup="menu" aria-label="更多" data-testid="row-more">
+            <MoreHorizontal size={18} />
+          </button>
+          {menu === "more" && (
+            <Pop onClose={close} className="cp-pop-more">
+              <button role="menuitem" onClick={() => (setMenu(null), setEditing(true))} data-testid="menu-edit">
+                <PenLine size={15} /> 编辑释义 / 笔记
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenu(null);
+                  if (it.srs) reader.removeFromReview(it.key);
+                  else reader.addToReview(it.key);
+                  toast(it.srs ? "已移出复习" : "已加入复习", "ok");
+                }}
+                data-testid="menu-review"
+              >
+                <GraduationCap size={15} /> {it.srs ? "移出复习" : "加入复习"}
+              </button>
+              {href && (
+                <a role="menuitem" href={href} data-testid="menu-source">
+                  <CornerUpLeft size={15} /> {it.ctx?.musk ? `Musk 原句 · ${clock(it.ctx.musk.t)}` : `回到《${it.ctx!.title.slice(0, 14)}》`}
+                </a>
+              )}
+              <button
+                role="menuitem"
+                className="is-danger"
+                onClick={() => {
+                  setMenu(null);
+                  if (confirm(`删除「${it.text.slice(0, 40)}」？`)) reader.remove(it.key);
+                }}
+                data-testid="menu-delete"
+              >
+                <Trash2 size={15} /> 删除
+              </button>
+            </Pop>
+          )}
         </span>
-      </button>
+      </div>
       {open && (
-        <div className="rd-row-detail">
-          <StatusPicker value={it.status} onChange={(st) => reader.upsert(it.text, { status: st })} />
-          <label className="rd-field">
-            <span>释义</span>
-            <textarea rows={2} value={it.meaning} onChange={(e) => reader.upsert(it.text, { meaning: e.target.value })} />
-          </label>
-          <RowMeanings it={it} />
-          <label className="rd-field">
-            <span>笔记</span>
-            <textarea rows={2} value={it.notes} onChange={(e) => reader.upsert(it.text, { notes: e.target.value })} />
-          </label>
-          <div className="rd-row-actions">
-            {href && (
-              <a className="rd-btn" href={href}>
-                {it.ctx?.musk ? `Musk 原句 · ${clock(it.ctx.musk.t)}` : `回到《${it.ctx!.title.slice(0, 18)}》`}
-              </a>
-            )}
-            <button className="rd-btn" onClick={() => (it.srs ? reader.removeFromReview(it.key) : reader.addToReview(it.key))}>
-              <GraduationCap size={15} /> {it.srs ? "移出复习" : "加入复习"}
-            </button>
-            <button className="rd-btn rd-btn-danger" onClick={() => reader.remove(it.key)} aria-label="删除">
-              <Trash2 size={15} />
-            </button>
-          </div>
-          {it.kind !== "sentence" && <MuskSays q={it.key} compact />}
+        <div className="rd-row-detail cp-detail">
+          <CorpusPlay it={it} replay={replay} />
         </div>
       )}
+      <Sheet open={editing} onClose={() => setEditing(false)} label="编辑释义和笔记" className="rd-sheet">
+        <div className="cp-edit">
+          <h2>{it.text}</h2>
+          <label className="rd-field">
+            <span>释义</span>
+            <textarea rows={2} value={it.meaning} onChange={(e) => reader.upsert(it.text, { meaning: e.target.value })} data-testid="edit-meaning" />
+          </label>
+          {editing && <RowMeanings it={it} />}
+          <label className="rd-field">
+            <span>笔记</span>
+            <textarea rows={3} value={it.notes} onChange={(e) => reader.upsert(it.text, { notes: e.target.value })} />
+          </label>
+          <button className="rd-btn rd-btn-primary" onClick={() => setEditing(false)}>
+            完成
+          </button>
+        </div>
+      </Sheet>
     </li>
   );
 }

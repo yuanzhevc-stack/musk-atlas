@@ -1330,3 +1330,95 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
   .rd-tts-auto-label { display: none; }
   .rd-lesson-tools .rd-icon { min-width: 34px; }
 }
+
+/* ---------- 语料 row: status popover, ⋯ menu, play detail ---------- */
+.rd-row { overflow: visible; }
+.rd-list { overflow: visible; }
+.rd-row:first-child { border-radius: 18px 18px 0 0; }
+.cp-main { padding: 0; gap: 0; align-items: flex-start; }
+.cp-main:hover { background: none; }
+.cp-anchor { position: relative; flex: none; }
+.cp-pill { margin: 15px 0 0 16px; min-width: 38px; cursor: pointer; transition: transform 0.15s; }
+.cp-pill:hover { transform: scale(1.06); }
+.cp-pill:active { transform: scale(0.94); }
+.cp-body { flex: 1; text-align: left; padding: 14px 8px 14px 12px; border-radius: 12px; }
+.cp-body:hover { background: var(--rd-fill); }
+.cp-more { margin: 10px 8px 0 0; color: var(--ink-3); }
+.cp-pop {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--rd-glass);
+  -webkit-backdrop-filter: saturate(180%) blur(22px);
+  backdrop-filter: saturate(180%) blur(22px);
+  box-shadow: 0 0 0 0.5px var(--rd-hair), 0 12px 36px -8px rgb(0 0 0 / 0.28);
+  animation: cp-pop 0.18s var(--ease, ease) both;
+}
+@keyframes cp-pop { from { opacity: 0; transform: translateY(-4px) scale(0.97); } }
+.cp-pop-status { left: 8px; display: flex; gap: 4px; }
+.cp-pop-status button {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  width: 48px;
+  padding: 7px 0 6px;
+  border-radius: 11px;
+  color: var(--ink);
+}
+.cp-pop-status button b {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--rd-fill-2);
+}
+.cp-pop-status button.st-1 b { background: var(--rd-y1); }
+.cp-pop-status button.st-2 b { background: var(--rd-y2); }
+.cp-pop-status button.st-3 b { background: var(--rd-y3); }
+.cp-pop-status button.st-4 b { background: var(--rd-y4); }
+.cp-pop-status button.st-5 b { color: #30d158; }
+.cp-pop-status button small { font-size: 10.5px; color: var(--ink-3); }
+.cp-pop-status button:hover { background: var(--rd-fill); }
+.cp-pop-status button.is-on { background: var(--rd-fill-2); }
+.cp-pop-status button.is-on b { box-shadow: 0 0 0 2px var(--rd-blue-ink); }
+.cp-pop-more { right: 6px; min-width: 210px; display: grid; }
+.cp-pop-more > * {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--ink);
+  text-align: left;
+  white-space: nowrap;
+}
+.cp-pop-more > *:hover { background: var(--rd-fill-2); }
+.cp-pop-more .is-danger { color: #ff453a; }
+.cp-detail { padding: 0 16px 16px 66px; }
+.cp { display: grid; gap: 10px; }
+.cp-stage { margin: 0; }
+.cp-frame { border-radius: 14px; overflow: hidden; }
+.cp-out { margin: 4px 0 0; font-size: 12.5px; }
+.cp-out a { color: var(--rd-blue-ink); display: inline-flex; align-items: center; gap: 4px; }
+.cp-back { justify-self: start; font-size: 13px; }
+.cp-tts { display: grid; justify-items: start; gap: 6px; }
+.cp-tts small { display: inline-flex; gap: 4px; align-items: center; font-size: 11.5px; }
+.cp-others h4 small { margin-left: 4px; font-weight: 600; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.cp-line mark, .cp-stage mark { background: var(--rd-y2); color: inherit; border-radius: 3px; padding: 0 1px; }
+.cp-edit { display: grid; gap: 12px; }
+.cp-edit h2 { margin: 0; font-size: 20px; }
+@media (max-width: 600px) {
+  .cp-detail { padding: 0 12px 14px; }
+  .cp-pop-status { gap: 2px; padding: 5px; }
+  .cp-pop-status button { width: 46px; }
+}
+.cp-main { position: relative; z-index: 3; }
+.cp-pill { margin-top: 16px; }
+.cp-stage, .cp-back { max-width: 560px; }
+.cp-others { max-width: 640px; }
+.cp-main .cp-pill { margin: 15px 0 0 16px; }
