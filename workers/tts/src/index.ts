@@ -1,6 +1,8 @@
 /**
  * musk-atlas-tts — tiny proxy for xAI text-to-speech (stock preset voice only; no cloning).
  * POST { text } -> audio/mpeg. Audio is cached in R2 at tts/<sha256>.mp3 so repeats are free.
+ * GET /captions?v=<videoId> -> { v, title, lang, kind, segs:[[ms, durMs, text]] } — public YouTube captions
+ * (manual English first, then auto), no cookies or accounts. Cached in R2 at yt/<id>.json.
  */
 interface Env {
   BUCKET: R2Bucket;
@@ -14,7 +16,7 @@ const MAX_CHARS = 600;
 
 const cors = (origin: string) => ({
   "Access-Control-Allow-Origin": origin,
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
   "Access-Control-Expose-Headers": "X-TTS-Cache, X-TTS-Voice",
   "Access-Control-Max-Age": "86400",
@@ -32,6 +34,8 @@ export default {
     if (!ORIGINS.has(origin)) return new Response("forbidden", { status: 403 });
     const h = cors(origin);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: h });
+    const url = new URL(req.url);
+    if (url.pathname === "/captions" && req.method === "GET") return captions(url, env, h);
     if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: h });
 
     let text = "";
@@ -71,3 +75,69 @@ export default {
     return new Response(buf, { headers: { ...audioHeaders, "X-TTS-Cache": "miss" } });
   },
 };
+
+/* ---------- YouTube captions ---------- */
+type Track = { baseUrl: string; languageCode: string; kind?: string; name?: { simpleText?: string; runs?: { text: string }[] } };
+const CLIENTS: { name: string; id: number; body: Record<string, unknown>; ua: string }[] = [
+  { name: "ANDROID_VR", id: 28, ua: "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip", body: { clientName: "ANDROID_VR", clientVersion: "1.60.19", deviceMake: "Oculus", deviceModel: "Quest 3", androidSdkVersion: 32, osName: "Android", osVersion: "12L" } },
+  { name: "IOS", id: 5, ua: "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)", body: { clientName: "IOS", clientVersion: "20.10.4", deviceMake: "Apple", deviceModel: "iPhone16,2", osName: "iPhone", osVersion: "18.3.2.22D82" } },
+  { name: "WEB", id: 1, ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", body: { clientName: "WEB", clientVersion: "2.20250312.04.00" } },
+];
+
+async function player(v: string) {
+  const tried: string[] = [];
+  for (const c of CLIENTS) {
+    const r = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": c.ua, "X-YouTube-Client-Name": String(c.id), "X-YouTube-Client-Version": String(c.body.clientVersion), Origin: "https://www.youtube.com" },
+      body: JSON.stringify({ videoId: v, context: { client: { ...c.body, hl: "en", gl: "US" } }, contentCheckOk: true, racyCheckOk: true }),
+    }).catch(() => null);
+    if (!r || !r.ok) {
+      tried.push(`${c.name}:${r?.status ?? "net"}`);
+      continue;
+    }
+    const j = (await r.json()) as {
+      playabilityStatus?: { status?: string; reason?: string };
+      videoDetails?: { title?: string; author?: string; lengthSeconds?: string };
+      captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: Track[] } };
+    };
+    const tracks = j.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+    tried.push(`${c.name}:${j.playabilityStatus?.status ?? "?"}:${tracks.length}`);
+    if (tracks.length) return { client: c, title: j.videoDetails?.title ?? "", author: j.videoDetails?.author ?? "", tracks, tried };
+  }
+  return { client: null, title: "", author: "", tracks: [] as Track[], tried };
+}
+
+function pick(tracks: Track[]) {
+  const en = (t: Track) => /^en\b/i.test(t.languageCode);
+  return tracks.find((t) => en(t) && t.kind !== "asr") ?? tracks.find((t) => en(t) && t.kind === "asr") ?? null;
+}
+
+async function captions(url: URL, env: Env, h: Record<string, string>) {
+  const v = url.searchParams.get("v") ?? "";
+  if (!/^[A-Za-z0-9_-]{11}$/.test(v)) return new Response("bad video id", { status: 400, headers: h });
+  const json = { ...h, "Content-Type": "application/json; charset=utf-8" };
+  const key = `yt/${v}.json`;
+  const hit = await env.BUCKET.get(key);
+  if (hit) return new Response(hit.body, { headers: { ...json, "X-TTS-Cache": "hit" } });
+
+  const p = await player(v);
+  const tr = pick(p.tracks);
+  if (!tr) return new Response(JSON.stringify({ error: p.tracks.length ? "no_english" : "no_captions", tried: p.tried }), { status: 404, headers: json });
+  const cu = new URL(tr.baseUrl.startsWith("http") ? tr.baseUrl : `https://www.youtube.com${tr.baseUrl}`);
+  cu.searchParams.set("fmt", "json3");
+  const r = await fetch(cu.toString(), { headers: { "User-Agent": p.client!.ua } });
+  const body = r.ok ? await r.text() : "";
+  if (!body) return new Response(JSON.stringify({ error: "timedtext_blocked", status: r.status, tried: p.tried }), { status: 502, headers: json });
+  const ev = (JSON.parse(body) as { events?: { tStartMs?: number; dDurationMs?: number; segs?: { utf8?: string; tOffsetMs?: number }[] }[] }).events ?? [];
+  const segs: [number, number, string][] = [];
+  for (const e of ev) {
+    if (!e.segs) continue;
+    const text = e.segs.map((s) => s.utf8 ?? "").join("").replace(/\s+/g, " ").trim();
+    if (text) segs.push([e.tStartMs ?? 0, e.dDurationMs ?? 0, text]);
+  }
+  if (!segs.length) return new Response(JSON.stringify({ error: "empty_captions", tried: p.tried }), { status: 502, headers: json });
+  const out = JSON.stringify({ v, title: p.title, author: p.author, lang: tr.languageCode, kind: tr.kind === "asr" ? "asr" : "manual", via: p.client!.name, segs });
+  await env.BUCKET.put(key, out, { httpMetadata: { contentType: "application/json" } });
+  return new Response(out, { headers: { ...json, "X-TTS-Cache": "miss" } });
+}

@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpen, Bookmark, Check, ChevronLeft, ChevronRight, ExternalLink, Pause, Play, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Bookmark, Youtube, X as Close, Check, ChevronLeft, ChevronRight, ExternalLink, Pause, Play, Plus, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { go } from "../lib/router";
 import { speak } from "../reader/dict";
@@ -8,6 +8,7 @@ import { StatusPicker, WordCard, type Sel } from "../reader/WordCard";
 export { StatusPicker };
 import { lessonStats, normalize, parse, phraseIndex, reader, useReader, type Context, type Item, type Lesson, type Status, type Token } from "../reader/model";
 import { gsel } from "../reader/select";
+import { captionsToLesson, clockOf, fetchCaptions, watchUrl, youtubeId } from "../reader/youtube";
 import { Sheet } from "../ui/Sheet";
 import { toast } from "../ui/Toast";
 
@@ -91,14 +92,41 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [text, setText] = useState("");
-  const ok = text.trim().length > 0;
-  const submit = () => {
-    if (!ok) return;
-    const firstLine = text.trim().split("\n")[0].slice(0, 48);
-    const ls = reader.addLesson({ title: title.trim() || firstLine, url: url.trim() || undefined, text: text.trim() });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  // A YouTube link in 来源链接, or pasted alone into 正文, imports its captions.
+  const textId = text.trim() && !/\s/.test(text.trim()) ? youtubeId(text) : null;
+  const vid = textId ?? (!text.trim() ? youtubeId(url) : null);
+  const ok = !busy && (!!vid || text.trim().length > 0);
+  const reset = () => {
     setTitle("");
     setUrl("");
     setText("");
+    setErr("");
+  };
+  const submit = async () => {
+    if (!ok) return;
+    if (vid) {
+      setBusy(true);
+      setErr("");
+      try {
+        const c = await fetchCaptions(vid);
+        const { text: body, times } = captionsToLesson(c);
+        if (!body.trim()) throw new Error("字幕是空的");
+        const ls = reader.addLesson({ title: title.trim() || c.title || vid, url: watchUrl(vid), text: body, yt: { v: vid, times, kind: c.kind, author: c.author } });
+        reset();
+        onClose();
+        go({ page: "reader", l: ls.id });
+      } catch (e) {
+        setErr((e as Error).message);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    const firstLine = text.trim().split("\n")[0].slice(0, 48);
+    const ls = reader.addLesson({ title: title.trim() || firstLine, url: url.trim() || undefined, text: text.trim() });
+    reset();
     onClose();
     go({ page: "reader", l: ls.id });
   };
@@ -112,14 +140,20 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
         </label>
         <label>
           <span>来源链接</span>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://（可选）" inputMode="url" autoCapitalize="off" />
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://（可选）· YouTube 链接可直接导入字幕" inputMode="url" autoCapitalize="off" data-testid="import-url" />
         </label>
+        {vid ? (
+          <p className="rd-yt-hint" data-testid="import-yt">
+            <Youtube size={16} /> YouTube 视频 · 自动读取英文字幕（优先人工字幕）
+          </p>
+        ) : null}
         <label>
           <span>正文</span>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="粘贴英文文本…" rows={9} data-testid="import-text" />
+          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="粘贴英文文本，或一个 YouTube 链接…" rows={vid && !textId ? 4 : 9} data-testid="import-text" />
         </label>
-        <button className="rd-btn rd-btn-primary" disabled={!ok} onClick={submit} data-testid="import-save">
-          开始阅读
+        {err && <p className="rd-err" data-testid="import-err">{err}</p>}
+        <button className="rd-btn rd-btn-primary" disabled={!ok} onClick={() => void submit()} data-testid="import-save">
+          {busy ? "读取字幕…" : vid ? "导入字幕并阅读" : "开始阅读"}
         </button>
       </div>
     </Sheet>
@@ -144,6 +178,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   const [flash, setFlash] = useState<number | undefined>(focusSid);
   const [size, setSize] = useState(() => Number(localStorage.getItem("musk-atlas:reader:size")) || 21);
   const [autoMusk, setAutoMusk] = useState(0);
+  const [video, setVideo] = useState<{ t: number; n: number } | null>(null);
   const anchor = useRef<number | null>(null);
   const drag = useRef<{ start: number; moved: boolean } | null>(null);
   const textRef = useRef<HTMLDivElement>(null);
@@ -376,10 +411,48 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
       <div className="rd-grid">
         <article className="rd-article">
           <h1 className="rd-lesson-title">{lesson.title}</h1>
-          {lesson.url && (
-            <a className="rd-source" href={lesson.url} target="_blank" rel="noreferrer">
-              {lesson.url.replace(/^https?:\/\//, "").slice(0, 60)} <ExternalLink size={12} />
-            </a>
+          {lesson.yt ? (
+            <p className="rd-source rd-yt-meta">
+              <Youtube size={14} /> {lesson.yt.author ? `${lesson.yt.author} · ` : ""}
+              {lesson.yt.kind === "asr" ? "自动字幕" : "人工字幕"} ·{" "}
+              <a href={watchUrl(lesson.yt.v)} target="_blank" rel="noreferrer">
+                YouTube <ExternalLink size={12} />
+              </a>
+              {!video && (
+                <button className="rd-link" onClick={() => setVideo({ t: 0, n: Date.now() })} data-testid="yt-open">
+                  看视频
+                </button>
+              )}
+            </p>
+          ) : (
+            lesson.url && (
+              <a className="rd-source" href={lesson.url} target="_blank" rel="noreferrer">
+                {lesson.url.replace(/^https?:\/\//, "").slice(0, 60)} <ExternalLink size={12} />
+              </a>
+            )
+          )}
+          {lesson.yt && video && (
+            <div className="rd-yt" data-testid="yt-panel">
+              <div className="rd-yt-frame">
+                <iframe
+                  key={video.n}
+                  src={`https://www.youtube-nocookie.com/embed/${lesson.yt.v}?start=${Math.floor(video.t)}&autoplay=1&playsinline=1&rel=0&cc_load_policy=0`}
+                  title={lesson.title}
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  allowFullScreen
+                  data-testid="yt-embed"
+                />
+              </div>
+              <div className="rd-yt-bar">
+                <span className="rd-dim">如果视频要求验证，</span>
+                <a href={watchUrl(lesson.yt.v, video.t)} target="_blank" rel="noreferrer" data-testid="yt-out">
+                  在 YouTube 打开 {clockOf(video.t)} <ExternalLink size={12} />
+                </a>
+                <button className="rd-icon" onClick={() => setVideo(null)} aria-label="关闭视频">
+                  <Close size={15} />
+                </button>
+              </div>
+            </div>
           )}
           <div ref={textRef} className={`rd-text ${tt.sid != null ? "is-reading" : ""}`} style={{ fontSize: size }} data-testid="reader-text">
             {paras.map((p, pi) => (
@@ -453,6 +526,11 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
                     </Fragment>
                   );
                 })}
+                {lesson.yt?.times[g[0].sid] != null && (
+                  <button className="rd-ts" onClick={() => setVideo({ t: lesson.yt!.times[g[0].sid], n: Date.now() })} data-testid="ts" title="跳到视频这里">
+                    {clockOf(lesson.yt.times[g[0].sid])}
+                  </button>
+                )}
                 </span>
                 ))}
               </p>

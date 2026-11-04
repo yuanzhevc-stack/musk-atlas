@@ -44,6 +44,8 @@ export interface Lesson {
   created: number;
   opened?: number;
   page?: number;
+  /** Imported from YouTube: video id + start time (seconds) of every sentence (by sid). */
+  yt?: { v: string; times: number[]; kind: "manual" | "asr"; author?: string };
 }
 
 interface State {
@@ -239,7 +241,8 @@ export function splitSentences(p: string): string[] {
 }
 
 export function parse(text: string): Parsed {
-  const paras = text.replace(/\r/g, "").split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
+  // Blank line = paragraph; a single line break = forced sentence break (one line each).
+  const paras = text.replace(/\r/g, "").split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   const sentences: string[] = [];
   const paragraphs: Paragraph[] = [];
   let i = 0;
@@ -247,7 +250,7 @@ export function parse(text: string): Parsed {
     let tokens: Token[] = [];
     let words = 0;
     let cont = false;
-    for (const s of splitSentences(p)) {
+    for (const s of p.split("\n").flatMap((line) => splitSentences(line.trim()))) {
       // Split very long paragraphs (pasted transcripts) at sentence boundaries so paging stays even.
       if (words >= PAGE_WORDS && tokens.length) {
         paragraphs.push({ tokens, ...(cont ? { cont } : {}) });

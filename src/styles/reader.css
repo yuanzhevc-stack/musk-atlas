@@ -1164,3 +1164,30 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
   .td-stats { grid-template-columns: repeat(2, 1fr); }
   .td-review { padding: 18px; }
 }
+
+/* ---------- YouTube lessons ---------- */
+.rd-yt-hint { display: flex; align-items: center; gap: 8px; margin: -2px 0 0; font-size: 13.5px; font-weight: 600; color: #ff3b30; }
+.rd-err { margin: 0; font-size: 13.5px; color: #ff3b30; }
+.rd-yt-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rd-yt-meta svg { color: #ff3b30; }
+.rd-yt-meta a { display: inline-flex; align-items: center; gap: 3px; color: inherit; }
+.rd-yt-meta .rd-link { margin-left: 6px; border: 0; background: none; cursor: pointer; font: inherit; font-weight: 600; }
+.rd-yt {
+  position: sticky; top: calc(var(--top, 64px) + 8px); z-index: 6;
+  margin: 14px 0 6px; border-radius: 16px; overflow: hidden;
+  background: var(--card); border: 1px solid var(--rd-hair);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+.rd-yt-frame { position: relative; aspect-ratio: 16 / 9; background: #000; }
+.rd-yt-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.rd-yt-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 14px; font-size: 13px; }
+.rd-yt-bar a { display: inline-flex; align-items: center; gap: 3px; color: var(--rd-blue-ink); font-weight: 600; }
+.rd-yt-bar .rd-icon { margin-left: auto; }
+.rd-text .rd-ts {
+  margin-left: 0.4em; padding: 0 0.4em; border: 0; border-radius: 6px;
+  font-family: var(--rd-font); font-size: 0.56em; font-weight: 600; font-variant-numeric: tabular-nums;
+  vertical-align: 0.18em; color: var(--ink-3); background: var(--rd-fill); cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.rd-text .rd-ts:hover { color: var(--rd-blue-ink); background: color-mix(in oklab, var(--rd-blue-ink) 12%, transparent); }
+@media (max-width: 560px) { .rd-yt { margin-left: -6px; margin-right: -6px; } }
