@@ -13,4 +13,4 @@ git add -A public/musk/index
 if git diff --cached --quiet; then echo "index unchanged"; exit 0; fi
 N=$(python3 -c "import json;m=json.load(open('public/musk/index/manifest.json'));print(len(m['videos']),m['n'],m['labels'].get('musk',0))")
 git -c user.name="yuanzhevc-stack" -c user.email="yuanzhevc-stack@users.noreply.github.com" commit -qm "Update Musk index: $N (videos sentences musk)" -- public/musk/index
-git push -q origin main && echo "pushed: $N"
+git pull -q --rebase origin main && git push -q origin main && echo "pushed: $N"
