@@ -1060,3 +1060,5 @@
 @media (max-width: 600px) {
   .rd-tts-auto { padding: 0 10px; }
 }
+.rd-text.is-reading span:not(.is-say) { opacity: 0.42; transition: opacity 0.3s; }
+.rd-text span { transition: opacity 0.3s; }

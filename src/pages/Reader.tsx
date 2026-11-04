@@ -395,7 +395,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
               {lesson.url.replace(/^https?:\/\//, "").slice(0, 60)} <ExternalLink size={12} />
             </a>
           )}
-          <div ref={textRef} className="rd-text" style={{ fontSize: size }} data-testid="reader-text">
+          <div ref={textRef} className={`rd-text ${tt.sid != null ? "is-reading" : ""}`} style={{ fontSize: size }} data-testid="reader-text">
             {paras.map((p, pi) => (
               <p key={pg.from + pi}>
                 {p.tokens.map((t, ti) => {

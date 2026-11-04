@@ -166,30 +166,30 @@ function cached<T>(id: string, run: () => Promise<T | null>): Promise<T | null> 
   return inflight.get(id) as Promise<T | null>;
 }
 
-/** Machine translation en -> zh: MyMemory first, then Google gtx; each with a timeout. */
+/** Machine translation en -> zh: MyMemory and Google gtx raced in parallel (8 s timeout each); first usable answer wins. */
 export function translate(text: string) {
   return cached<string>(`mt:${text}`, async () => {
-    try {
-      const r = await timed(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|zh-CN`);
-      if (r.ok) {
-        const j = (await r.json()) as { responseStatus?: number; responseData?: { translatedText?: string } };
-        const t = j.responseData?.translatedText?.trim();
-        if (t && j.responseStatus === 200 && !/MYMEMORY WARNING|QUERY LENGTH/i.test(t) && /[\u4e00-\u9fff]/.test(t)) return t;
-      }
-    } catch {
-      /* next */
-    }
-    try {
-      const r = await timed(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=${encodeURIComponent(text)}`);
-      if (r.ok) {
-        const j = (await r.json()) as [[string, string][]];
-        const t = j?.[0]?.map((x) => x[0]).join("").trim();
-        if (t) return t;
-      }
-    } catch {
-      /* none */
-    }
-    return null;
+    const q = encodeURIComponent(text);
+    const mymemory = async () => {
+      const r = await timed(`https://api.mymemory.translated.net/get?q=${q}&langpair=en|zh-CN`, 8000);
+      const j = (await r.json()) as { responseStatus?: number; responseData?: { translatedText?: string } };
+      const t = j.responseData?.translatedText?.trim();
+      if (t && j.responseStatus === 200 && !/MYMEMORY WARNING|QUERY LENGTH/i.test(t) && /[\u4e00-\u9fff]/.test(t)) return t;
+      throw new Error("mymemory");
+    };
+    const gtx = async () => {
+      const r = await timed(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=${q}`, 8000);
+      const j = (await r.json()) as [[string, string][]];
+      const t = j?.[0]?.map((x) => x[0]).join("").trim();
+      if (t) return t;
+      throw new Error("gtx");
+    };
+    return new Promise<string | null>((res) => {
+      let left = 2;
+      const fail = () => --left === 0 && res(null);
+      mymemory().then(res, fail);
+      gtx().then(res, fail);
+    });
   });
 }
 
