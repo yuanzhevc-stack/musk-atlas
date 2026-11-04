@@ -678,8 +678,9 @@ code {
   right: 0;
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
   background: color-mix(in oklab, var(--paper) 86%, transparent);
   backdrop-filter: saturate(1.4) blur(18px);
   -webkit-backdrop-filter: saturate(1.4) blur(18px);

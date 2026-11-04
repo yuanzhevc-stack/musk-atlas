@@ -1,0 +1,649 @@
+import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, ExternalLink, Plus, Trash2, Volume2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useAtlas } from "../atlas/context";
+import { go, openWord } from "../lib/router";
+import { lexicon, lookup, speak, type Def } from "../reader/dict";
+import { lessonStats, normalize, parse, phraseIndex, reader, useReader, type Context, type Item, type Lesson, type Status, type Token } from "../reader/model";
+import { MuskSays } from "../reader/MuskSays";
+import { Sheet } from "../ui/Sheet";
+import { toast } from "../ui/Toast";
+
+const SAMPLE = {
+  title: "示例 · 关于第一性原理",
+  text: `I think it's important to reason from first principles rather than by analogy. The normal way we conduct our lives is we reason by analogy. We are doing this because it's like something else that was done, or it is like what other people are doing.
+
+With first principles, you boil things down to the most fundamental truths you can imagine, and then you reason up from there. Look at the materials a rocket is made of: aluminum, titanium, copper, carbon fiber. What is the value of those materials on the commodity market? It turned out that the materials cost was only around two percent of the typical price.
+
+So the question is: why is it so expensive? It's not that people are stupid. It's just that the industry got stuck doing things the way they had always been done. If you want to make a big change, you have to actually look at the problem and figure out what's true.`,
+};
+
+export function ToolTabs({ on }: { on: "reader" | "corpus" }) {
+  return (
+    <div className="rd-tabs" role="tablist">
+      <a href="#/reader" className={on === "reader" ? "is-on" : ""} role="tab" aria-selected={on === "reader"}>
+        课程
+      </a>
+      <a href="#/corpus" className={on === "corpus" ? "is-on" : ""} role="tab" aria-selected={on === "corpus"}>
+        语料库
+      </a>
+    </div>
+  );
+}
+
+export function ReaderPage({ l, s }: { l?: string; s?: string }) {
+  const st = useReader();
+  const lesson = l ? st.lessons.find((x) => x.id === l) : undefined;
+  if (l && lesson) return <LessonView key={lesson.id} lesson={lesson} focusSid={s ? Number(s) : undefined} />;
+  return <Library missing={!!l} />;
+}
+
+/* ---------- library ---------- */
+
+function Library({ missing }: { missing: boolean }) {
+  const st = useReader();
+  const [importing, setImporting] = useState(false);
+  return (
+    <div className="page rd-page">
+      <header className="rd-head">
+        <div>
+          <p className="rd-eyebrow">阅读</p>
+          <h1 className="rd-title">课程</h1>
+        </div>
+        <ToolTabs on="reader" />
+      </header>
+      {missing && <p className="rd-dim">这节课不在这台设备上（数据存在本机浏览器）。</p>}
+      <div className="rd-lib">
+        <button className="rd-card rd-card-new" onClick={() => setImporting(true)} data-testid="import-open">
+          <Plus size={22} />
+          <b>导入课程</b>
+          <span>粘贴一段英文</span>
+        </button>
+        {st.lessons.map((ls) => {
+          const k = lessonStats(ls.text, st.items);
+          const known = k.unique ? Math.round(((k.unique - k.blue - k.learning) / k.unique) * 100) : 0;
+          return (
+            <a key={ls.id} href={`#/reader?l=${ls.id}`} className="rd-card" data-testid="lesson-card">
+              <b>{ls.title}</b>
+              <span className="rd-card-meta">
+                {k.unique} 词 · <i className="dot dot-blue" />
+                {k.blue} · <i className="dot dot-yellow" />
+                {k.learning}
+              </span>
+              <span className="rd-bar">
+                <span style={{ width: `${known}%` }} />
+              </span>
+              <span className="rd-card-foot">
+                {known}% 已知
+                {ls.url && <ExternalLink size={12} />}
+              </span>
+            </a>
+          );
+        })}
+        {!st.lessons.length && (
+          <button
+            className="rd-card rd-card-ghost"
+            onClick={() => {
+              const ls = reader.addLesson(SAMPLE);
+              go({ page: "reader", l: ls.id });
+            }}
+          >
+            <BookOpen size={20} />
+            <b>试试示例</b>
+            <span>一段关于第一性原理的短文</span>
+          </button>
+        )}
+      </div>
+      <ImportSheet open={importing} onClose={() => setImporting(false)} />
+    </div>
+  );
+}
+
+function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [title, setTitle] = useState("");
+  const [url, setUrl] = useState("");
+  const [text, setText] = useState("");
+  const ok = text.trim().length > 0;
+  const submit = () => {
+    if (!ok) return;
+    const firstLine = text.trim().split("\n")[0].slice(0, 48);
+    const ls = reader.addLesson({ title: title.trim() || firstLine, url: url.trim() || undefined, text: text.trim() });
+    setTitle("");
+    setUrl("");
+    setText("");
+    onClose();
+    go({ page: "reader", l: ls.id });
+  };
+  return (
+    <Sheet open={open} onClose={onClose} label="导入课程" className="rd-sheet">
+      <h2 className="rd-sheet-title">导入课程</h2>
+      <div className="rd-form">
+        <label>
+          <span>标题</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="可留空" data-testid="import-title" />
+        </label>
+        <label>
+          <span>来源链接</span>
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://（可选）" inputMode="url" autoCapitalize="off" />
+        </label>
+        <label>
+          <span>正文</span>
+          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="粘贴英文文本…" rows={9} data-testid="import-text" />
+        </label>
+        <button className="rd-btn rd-btn-primary" disabled={!ok} onClick={submit} data-testid="import-save">
+          开始阅读
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
+/* ---------- lesson ---------- */
+
+type Sel = { from: number; to: number };
+const isWord = (t: Token) => !!t.key;
+const statusClass = (it?: Item) => (!it ? "s-new" : it.status === 5 ? "s-known" : it.status === -1 ? "s-ign" : `s-${it.status}`);
+
+function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number }) {
+  const st = useReader();
+  const doc = useMemo(() => parse(lesson.text), [lesson.text]);
+  const startPage = useMemo(() => {
+    if (focusSid == null) return Math.min(lesson.page ?? 0, doc.pages.length - 1);
+    const pi = doc.paragraphs.findIndex((p) => p.tokens.some((t) => t.sid === focusSid));
+    return Math.max(0, doc.pages.findIndex((pg) => pi >= pg.from && pi < pg.to));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [page, setPage] = useState(Math.max(0, startPage));
+  const [sel, setSel] = useState<Sel | null>(null);
+  const [flash, setFlash] = useState<number | undefined>(focusSid);
+  const [size, setSize] = useState(() => Number(localStorage.getItem("musk-atlas:reader:size")) || 21);
+  const [autoMusk, setAutoMusk] = useState(0);
+  const anchor = useRef<number | null>(null);
+  const drag = useRef<{ start: number; moved: boolean } | null>(null);
+  const textRef = useRef<HTMLDivElement>(null);
+
+  const pg = doc.pages[page] ?? { from: 0, to: 0, words: 0 };
+  const paras = doc.paragraphs.slice(pg.from, pg.to);
+  const tokens = useMemo(() => paras.flatMap((p) => p.tokens), [paras]);
+  const all = useMemo(() => doc.paragraphs.flatMap((p) => p.tokens), [doc]);
+
+  useEffect(() => reader.updateLesson(lesson.id, { page, opened: Date.now() }), [page, lesson.id]);
+  useEffect(() => localStorage.setItem("musk-atlas:reader:size", String(size)), [size]);
+  useEffect(() => {
+    if (flash == null) return;
+    requestAnimationFrame(() => document.querySelector(`[data-sid="${flash}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+    const t = setTimeout(() => setFlash(undefined), 2400);
+    return () => clearTimeout(t);
+  }, [flash]);
+
+  // Saved phrases found in this page's text: token index -> phrase range.
+  const phraseAt = useMemo(() => {
+    const idx = phraseIndex(st.items);
+    const map = new Map<number, { from: number; to: number; key: string }>();
+    if (!idx.size) return map;
+    const words = tokens.filter(isWord);
+    words.forEach((t, j) => {
+      for (const ws of idx.get(t.key!) ?? []) {
+        if (j + ws.length > words.length) continue;
+        if (!ws.every((w, k) => words[j + k].key === w && words[j + k].sid === t.sid)) continue;
+        const r = { from: t.i, to: words[j + ws.length - 1].i, key: ws.join(" ") };
+        for (let i = r.from; i <= r.to; i++) if (!map.has(i) || map.get(i)!.key.length < r.key.length) map.set(i, r);
+      }
+    });
+    return map;
+  }, [tokens, st.items]);
+
+  const selText = sel ? all.slice(sel.from, sel.to + 1).map((t) => t.text).join("").replace(/\s+/g, " ").trim() : "";
+  const selKey = normalize(selText);
+  const selCtx: Context | undefined = sel
+    ? { lesson: lesson.id, title: lesson.title, sid: all[sel.from].sid, sentence: doc.sentences[all[sel.from].sid] }
+    : undefined;
+
+  const selectWord = (i: number, extend = false) => {
+    if (extend && anchor.current != null) {
+      const a = Math.min(anchor.current, i);
+      const b = Math.max(anchor.current, i);
+      if (all[a].sid !== all[b].sid && b - a > 40) return;
+      setSel({ from: a, to: b });
+    } else {
+      anchor.current = i;
+      setSel({ from: i, to: i });
+    }
+  };
+
+  const nav = (dir: 1 | -1, onlyBlue = false) => {
+    const cur = sel ? (dir > 0 ? sel.to : sel.from) : dir > 0 ? tokens[0]?.i - 1 : tokens[tokens.length - 1]?.i + 1;
+    const list = dir > 0 ? tokens : [...tokens].reverse();
+    const next = list.find((t) => {
+      if (!isWord(t) || (dir > 0 ? t.i <= cur : t.i >= cur)) return false;
+      const it = st.items[t.key!];
+      return onlyBlue ? !it : !it || (it.status >= 1 && it.status <= 4);
+    });
+    if (next) {
+      selectWord(next.i);
+      document.querySelector(`[data-ti="${next.i}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  };
+
+  const setStatus = (s: Status) => {
+    if (!sel || !selKey) return;
+    reader.setStatus(selText, s, selCtx);
+    if (s === 5 || s === -1) nav(1);
+  };
+
+  const blueOnPage = () => [...new Set(tokens.filter((t) => isWord(t) && !st.items[t.key!]).map((t) => t.text))];
+  const turn = (d: 1 | -1) => {
+    const n = page + d;
+    if (n < 0 || n >= doc.pages.length) return;
+    setSel(null);
+    setPage(n);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const pageDone = () => {
+    const blue = blueOnPage();
+    reader.markKnown(blue);
+    toast(blue.length ? `${blue.length} 个蓝词已标为已知` : "本页没有蓝词", "ok");
+    if (page < doc.pages.length - 1) turn(1);
+    else {
+      setSel(null);
+      go({ page: "reader" });
+    }
+  };
+
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) {
+        if (e.key === "Escape") t.blur();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key;
+      let hit = true;
+      if (k === "ArrowRight" && e.shiftKey) turn(1);
+      else if (k === "ArrowLeft" && e.shiftKey) turn(-1);
+      else if (k === "ArrowRight") nav(1);
+      else if (k === "ArrowLeft") nav(-1);
+      else if (k === "b") nav(1, true);
+      else if (k === "+" || k === "=") setSize((x) => Math.min(30, x + 1));
+      else if (k === "-") setSize((x) => Math.max(15, x - 1));
+      else if (!sel) hit = false;
+      else if (k >= "1" && k <= "4") setStatus(Number(k) as Status);
+      else if (k === "k" || k === "5") setStatus(5);
+      else if (k === "x") setStatus(-1);
+      else if (k === "s") speak(selText);
+      else if (k === "m") setAutoMusk(Date.now());
+      else if (k === "h") document.querySelector<HTMLTextAreaElement>("[data-meaning]")?.focus();
+      else if (k === "Escape") setSel(null);
+      else hit = false;
+      if (hit) e.preventDefault();
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  });
+
+  useEffect(() => {
+    const up = () => {
+      setTimeout(() => (drag.current = null), 0);
+    };
+    window.addEventListener("pointerup", up);
+    return () => window.removeEventListener("pointerup", up);
+  }, []);
+
+  const blueCount = blueOnPage().length;
+
+  return (
+    <div className={`page rd-page rd-lesson ${sel ? "has-sel" : ""}`}>
+      <header className="rd-lesson-head">
+        <a href="#/reader" className="rd-back" aria-label="返回课程">
+          <ArrowLeft size={18} />
+          课程
+        </a>
+        <div className="rd-lesson-tools">
+          <button className="rd-icon" onClick={() => setSize((x) => Math.max(15, x - 1))} aria-label="缩小字号">
+            A<small>-</small>
+          </button>
+          <button className="rd-icon" onClick={() => setSize((x) => Math.min(30, x + 1))} aria-label="放大字号">
+            A<small>+</small>
+          </button>
+          <button
+            className="rd-icon"
+            onClick={() => {
+              if (confirm("删除这节课？语料库里的词会保留。")) {
+                reader.removeLesson(lesson.id);
+                go({ page: "reader" });
+              }
+            }}
+            aria-label="删除课程"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </header>
+
+      <div className="rd-grid">
+        <article className="rd-article">
+          <h1 className="rd-lesson-title">{lesson.title}</h1>
+          {lesson.url && (
+            <a className="rd-source" href={lesson.url} target="_blank" rel="noreferrer">
+              {lesson.url.replace(/^https?:\/\//, "").slice(0, 60)} <ExternalLink size={12} />
+            </a>
+          )}
+          <div ref={textRef} className="rd-text" style={{ fontSize: size }} data-testid="reader-text">
+            {paras.map((p, pi) => (
+              <p key={pg.from + pi}>
+                {p.tokens.map((t) => {
+                  const ph = phraseAt.get(t.i);
+                  const inSel = !!sel && t.i >= sel.from && t.i <= sel.to;
+                  const fl = flash === t.sid ? " is-flash" : "";
+                  if (!isWord(t))
+                    return (
+                      <span key={t.i} data-sid={t.sid} className={`${ph && t.i > ph.from && t.i < ph.to ? "ph" : ""}${inSel ? " in-sel" : ""}${fl}`}>
+                        {t.text}
+                      </span>
+                    );
+                  const it = st.items[t.key!];
+                  return (
+                    <span
+                      key={t.i}
+                      data-ti={t.i}
+                      data-sid={t.sid}
+                      data-testid="tok"
+                      className={`w ${statusClass(it)}${ph ? " ph" : ""}${inSel ? " in-sel" : ""}${sel && sel.from === t.i ? " sel-a" : ""}${sel && sel.to === t.i ? " sel-b" : ""}${fl}`}
+                      onPointerDown={(e) => {
+                        if (e.pointerType === "mouse" && e.button === 0 && !e.shiftKey) drag.current = { start: t.i, moved: false };
+                      }}
+                      onPointerEnter={() => {
+                        const d = drag.current;
+                        if (!d || t.i === d.start) return;
+                        d.moved = true;
+                        anchor.current = d.start;
+                        setSel({ from: Math.min(d.start, t.i), to: Math.max(d.start, t.i) });
+                      }}
+                      onClick={(e) => {
+                        if (drag.current?.moved) return;
+                        selectWord(t.i, e.shiftKey);
+                      }}
+                    >
+                      {t.text}
+                    </span>
+                  );
+                })}
+              </p>
+            ))}
+          </div>
+
+          <footer className="rd-pager">
+            <button className="rd-icon" onClick={() => turn(-1)} disabled={page === 0} aria-label="上一页">
+              <ChevronLeft size={18} />
+            </button>
+            <span>
+              {page + 1} / {doc.pages.length}
+            </span>
+            <button className="rd-icon" onClick={() => turn(1)} disabled={page >= doc.pages.length - 1} aria-label="下一页">
+              <ChevronRight size={18} />
+            </button>
+          </footer>
+          <button className="rd-btn rd-btn-done" onClick={pageDone} data-testid="page-done">
+            <Check size={17} />
+            {page < doc.pages.length - 1 ? "本页读完" : "读完课程"}
+            {blueCount > 0 && <small> · {blueCount} 个蓝词标为已知</small>}
+          </button>
+          <p className="rd-keys hide-touch">
+            <kbd>←</kbd>
+            <kbd>→</kbd> 切词 · <kbd>b</kbd> 下个蓝词 · <kbd>1</kbd>–<kbd>4</kbd> 等级 · <kbd>k</kbd> 已知 · <kbd>x</kbd> 忽略 · <kbd>h</kbd> 写释义 · <kbd>s</kbd> 发音 · <kbd>m</kbd>{" "}
+            Musk · <kbd>⇧</kbd>+拖动/点击 选短语 · <kbd>⇧</kbd>
+            <kbd>←</kbd>
+            <kbd>→</kbd> 翻页
+          </p>
+        </article>
+
+        <aside className={`rd-aside ${sel ? "is-open" : ""}`} aria-label="词卡">
+          {sel && selKey ? (
+            <Panel
+              key={selKey}
+              text={selText}
+              k={selKey}
+              ctx={selCtx!}
+              phrase={phraseAt.get(sel.from)}
+              autoMusk={autoMusk}
+              canExtend={{ left: sel.from > 0, right: sel.to < all.length - 1 }}
+              onExtend={(d) => {
+                const list = d > 0 ? all.slice(sel.to + 1) : all.slice(0, sel.from).reverse();
+                const w = list.find(isWord);
+                if (w) setSel(d > 0 ? { from: sel.from, to: w.i } : { from: w.i, to: sel.to });
+              }}
+              onPick={(r) => setSel(r)}
+              onStatus={setStatus}
+              onClose={() => setSel(null)}
+            />
+          ) : (
+            <div className="rd-empty">
+              <p>点一个词查看释义</p>
+              <p className="rd-dim">拖动或按住 ⇧ 点击可以选短语</p>
+              <div className="rd-legend">
+                <span>
+                  <i className="w s-new">新词</i>
+                </span>
+                <span>
+                  <i className="w s-1">1</i>
+                  <i className="w s-2">2</i>
+                  <i className="w s-3">3</i>
+                  <i className="w s-4">4</i> 学习中
+                </span>
+                <span>已知不标色</span>
+              </div>
+            </div>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- word / phrase panel ---------- */
+
+export function StatusPicker({ value, onChange }: { value: Status | 0; onChange: (s: Status) => void }) {
+  const opts: [Status, React.ReactNode, string][] = [
+    [1, "1", "新"],
+    [2, "2", "认得"],
+    [3, "3", "熟悉"],
+    [4, "4", "掌握"],
+    [5, <Check key="k" size={15} />, "已知"],
+    [-1, <X key="x" size={15} />, "忽略"],
+  ];
+  return (
+    <div className="rd-status" role="radiogroup" aria-label="状态">
+      {opts.map(([s, icon, label]) => (
+        <button key={s} role="radio" aria-checked={value === s} className={`st-${s} ${value === s ? "is-on" : ""}`} onClick={() => onChange(s)} title={label} data-testid={`status-${s}`}>
+          {icon}
+          <small>{label}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Panel({
+  text,
+  k,
+  ctx,
+  phrase,
+  autoMusk,
+  canExtend,
+  onExtend,
+  onPick,
+  onStatus,
+  onClose,
+}: {
+  text: string;
+  k: string;
+  ctx: Context;
+  phrase?: { from: number; to: number; key: string };
+  autoMusk: number;
+  canExtend: { left: boolean; right: boolean };
+  onExtend: (d: 1 | -1) => void;
+  onPick: (r: Sel) => void;
+  onStatus: (s: Status) => void;
+  onClose: () => void;
+}) {
+  const st = useReader();
+  const atlas = useAtlas();
+  const it = st.items[k];
+  const isPhrase = k.includes(" ");
+  const lex = useMemo(() => (isPhrase ? null : lexicon(atlas, k)), [atlas, k, isPhrase]);
+  const [dict, setDict] = useState<{ ipa?: string; defs: Def[] } | null | undefined>(undefined);
+  const [hint, setHint] = useState(0);
+  const [showMusk, setShowMusk] = useState(false);
+  useEffect(() => {
+    let live = true;
+    if (k.split(" ").length > 2) setDict({ defs: [] });
+    else lookup(k).then((d) => live && setDict(d));
+    return () => {
+      live = false;
+    };
+  }, [k]);
+  useEffect(() => {
+    if (autoMusk) setShowMusk(true);
+  }, [autoMusk]);
+
+  const hints = [...(lex ? [lex.zh] : []), ...(dict?.defs.map((d) => d.text) ?? [])].filter(Boolean).slice(0, 6);
+  const save = (patch: Partial<Item>) => reader.upsert(text, { status: it?.status ?? 1, ...patch }, ctx);
+  const accept = (h: string) => save({ meaning: !it?.meaning ? h : it.meaning.includes(h) ? it.meaning : `${it.meaning}；${h}` });
+
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      if (e.key === "ArrowDown" && hints.length) {
+        e.preventDefault();
+        setHint((h) => Math.min(hints.length - 1, h + 1));
+      } else if (e.key === "ArrowUp" && hints.length) {
+        e.preventDefault();
+        setHint((h) => Math.max(0, h - 1));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (hints[hint]) accept(hints[hint]);
+        else save({});
+      }
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  });
+
+  const sentence = ctx.sentence;
+  const at = sentence.toLowerCase().indexOf(text.toLowerCase());
+
+  return (
+    <div className="rd-panel" data-testid="panel">
+      <span className="rd-grip" aria-hidden="true" />
+      <header className="rd-panel-head">
+        <div>
+          <h3 data-testid="panel-word">{text}</h3>
+          <p className="rd-dim">
+            {isPhrase ? "短语" : dict?.ipa ?? ""}
+            {!it && <span className="rd-pill rd-pill-new">新词</span>}
+            {it && <span className={`rd-pill st-${it.status}`}>{it.status === 5 ? "已知" : it.status === -1 ? "忽略" : `等级 ${it.status}`}</span>}
+          </p>
+        </div>
+        <div className="rd-panel-tools">
+          <button className="rd-icon" onClick={() => speak(text)} aria-label="发音">
+            <Volume2 size={17} />
+          </button>
+          <button className="rd-icon" onClick={onClose} aria-label="关闭">
+            <X size={17} />
+          </button>
+        </div>
+      </header>
+
+      <StatusPicker value={it?.status ?? 0} onChange={onStatus} />
+
+      {!it && (
+        <button className="rd-btn rd-btn-primary rd-save" onClick={() => save({ meaning: hints[0] && !isPhrase ? hints[0] : "" })} data-testid="save">
+          <Plus size={16} /> {isPhrase ? "保存短语" : "加入语料库"}
+        </button>
+      )}
+
+      <div className="rd-extend">
+        <button disabled={!canExtend.left} onClick={() => onExtend(-1)}>
+          ‹ 向前扩展
+        </button>
+        <button disabled={!canExtend.right} onClick={() => onExtend(1)} data-testid="extend-right">
+          向后扩展 ›
+        </button>
+      </div>
+      {phrase && phrase.key !== k && (
+        <button className="rd-chip" onClick={() => onPick({ from: phrase.from, to: phrase.to })}>
+          短语 · {phrase.key}
+        </button>
+      )}
+
+      <label className="rd-field">
+        <span>释义</span>
+        <textarea
+          data-meaning
+          rows={2}
+          value={it?.meaning ?? ""}
+          placeholder={hints[0] ? `点下方释义，或自己写` : "写下你的释义"}
+          onChange={(e) => save({ meaning: e.target.value })}
+          data-testid="meaning"
+        />
+      </label>
+
+      {(hints.length > 0 || dict === undefined) && (
+        <ul className="rd-hints">
+          {lex && (
+            <li>
+              <button className={hint === 0 ? "is-on" : ""} onClick={() => accept(lex.zh)}>
+                <em>词库</em>
+                {lex.zh}
+              </button>
+              <button className="rd-link" onClick={() => openWord(lex.id)}>
+                详情
+              </button>
+            </li>
+          )}
+          {dict?.defs.slice(0, lex ? 5 : 6).map((d, j) => {
+            const idx = j + (lex ? 1 : 0);
+            return (
+              <li key={j}>
+                <button className={hint === idx ? "is-on" : ""} onClick={() => accept(d.text)}>
+                  <em>{d.pos}</em>
+                  {d.text}
+                </button>
+              </li>
+            );
+          })}
+          {dict === undefined && <li className="rd-dim">词典查询中…</li>}
+        </ul>
+      )}
+      {dict === null && !lex && <p className="rd-dim">在线词典暂时不可用，可以自己写释义</p>}
+
+      <label className="rd-field">
+        <span>笔记</span>
+        <textarea rows={2} value={it?.notes ?? ""} placeholder="例句、联想、用法…" onChange={(e) => save({ notes: e.target.value })} />
+      </label>
+
+      <figure className="rd-ctx">
+        <figcaption>原句</figcaption>
+        <blockquote>
+          {at >= 0 ? (
+            <>
+              {sentence.slice(0, at)}
+              <mark>{sentence.slice(at, at + text.length)}</mark>
+              {sentence.slice(at + text.length)}
+            </>
+          ) : (
+            sentence
+          )}
+        </blockquote>
+      </figure>
+
+      {showMusk ? (
+        <MuskSays q={k} autoplay={!!autoMusk} />
+      ) : (
+        <button className="rd-btn rd-btn-musk" onClick={() => setShowMusk(true)} data-testid="musk-open">
+          ▶ Musk 怎么说
+        </button>
+      )}
+    </div>
+  );
+}

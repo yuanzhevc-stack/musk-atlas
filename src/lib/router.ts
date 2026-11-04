@@ -3,6 +3,8 @@ import { transition } from "./motion";
 
 export type Route =
   | { page: "musk"; q?: string }
+  | { page: "reader"; l?: string; s?: string }
+  | { page: "corpus" }
   | { page: "today" }
   | { page: "atlas"; topic?: string; level?: string; q?: string; view?: string }
   | { page: "learn" }
@@ -23,6 +25,8 @@ function parse(hash: string): Location {
   const seg = path.split("/").filter(Boolean);
   let route: Route = { page: "musk", q: params.get("q") || undefined };
   if (seg[0] === "today") route = { page: "today" };
+  else if (seg[0] === "reader") route = { page: "reader", l: params.get("l") || undefined, s: params.get("s") || undefined };
+  else if (seg[0] === "corpus") route = { page: "corpus" };
   else if (seg[0] === "atlas")
     route = { page: "atlas", topic: params.get("topic") || undefined, level: params.get("level") || undefined, q: params.get("q") || undefined, view: params.get("view") || undefined };
   else if (seg[0] === "learn") route = { page: "learn" };
@@ -42,6 +46,10 @@ export function href(route: Route, word?: string | null) {
     if (route.view) params.set("view", route.view);
   }
   if (route.page === "musk" && route.q) params.set("q", route.q);
+  if (route.page === "reader") {
+    if (route.l) params.set("l", route.l);
+    if (route.s) params.set("s", route.s);
+  }
   if (word) params.set("w", word);
   const q = params.toString();
   return `#/${route.page === "musk" ? "" : route.page}${q ? `?${q}` : ""}`;

@@ -1,4 +1,4 @@
-import { AudioLines, BookOpen, ChevronLeft, ChevronRight, Compass, Github, Keyboard, Moon, Search, Sun, User } from "lucide-react";
+import { AudioLines, BookOpen, BookOpenText, ChevronLeft, ChevronRight, Compass, Github, Keyboard, Moon, Search, Sun, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { AtlasContext, useAtlas, useEntry } from "./atlas/context";
 import { loadOpenAtlas, loadPrivateAtlas } from "./atlas/data";
@@ -7,6 +7,8 @@ import { REPO_URL, UPSTREAM_URL } from "./config";
 import { closeWord, currentLocation, go, openWord, useLocation, type Route } from "./lib/router";
 import { AtlasPage } from "./pages/Atlas";
 import { MuskPage } from "./pages/Musk";
+import { ReaderPage } from "./pages/Reader";
+import { CorpusPage } from "./pages/Corpus";
 import { About } from "./pages/About";
 import { Learn } from "./pages/Learn";
 import { Me } from "./pages/Me";
@@ -25,11 +27,14 @@ import { Toasts } from "./ui/Toast";
 
 const NAV: { page: Route["page"]; label: string; icon: typeof Compass }[] = [
   { page: "musk", label: "Musk", icon: AudioLines },
+  { page: "reader", label: "阅读", icon: BookOpenText },
   { page: "today", label: "今日", icon: Compass },
   { page: "atlas", label: "图鉴", icon: BookOpen },
   { page: "practice", label: "练习", icon: Keyboard },
   { page: "me", label: "我的", icon: User },
 ];
+
+const navOn = (cur: Route["page"], page: Route["page"]) => cur === page || (page === "reader" && cur === "corpus");
 
 function useTheme() {
   const theme = useStore((s) => s.settings.theme);
@@ -132,7 +137,7 @@ function Shell({ privateAvailable }: { privateAvailable: boolean }) {
           </a>
           <nav className="topnav" aria-label="主导航">
             {NAV.map(({ page, label }) => (
-              <a key={page} href={page === "musk" ? "#/" : `#/${page}`} className={route.page === page ? "is-on" : ""} aria-current={route.page === page ? "page" : undefined}>
+              <a key={page} href={page === "musk" ? "#/" : `#/${page}`} className={navOn(route.page, page) ? "is-on" : ""} aria-current={navOn(route.page, page) ? "page" : undefined}>
                 {label}
               </a>
             ))}
@@ -156,6 +161,8 @@ function Shell({ privateAvailable }: { privateAvailable: boolean }) {
 
       <main className="main" id="main">
         {route.page === "musk" && <MuskPage q={route.q} />}
+        {route.page === "reader" && <ReaderPage l={route.l} s={route.s} />}
+        {route.page === "corpus" && <CorpusPage />}
         {route.page === "today" && <Today />}
         {route.page === "atlas" && <AtlasPage route={route} />}
         {route.page === "learn" && <Learn />}
@@ -184,8 +191,8 @@ function Shell({ privateAvailable }: { privateAvailable: boolean }) {
       {!focus && (
         <nav className="tabbar" aria-label="主导航">
           {NAV.map(({ page, label, icon: Icon }) => (
-            <a key={page} href={page === "musk" ? "#/" : `#/${page}`} className={route.page === page ? "is-on" : ""} aria-current={route.page === page ? "page" : undefined}>
-              <Icon size={22} strokeWidth={route.page === page ? 2.1 : 1.7} />
+            <a key={page} href={page === "musk" ? "#/" : `#/${page}`} className={navOn(route.page, page) ? "is-on" : ""} aria-current={navOn(route.page, page) ? "page" : undefined}>
+              <Icon size={22} strokeWidth={navOn(route.page, page) ? 2.1 : 1.7} />
               <span>{label}</span>
             </a>
           ))}
@@ -194,7 +201,7 @@ function Shell({ privateAvailable }: { privateAvailable: boolean }) {
 
       <WordSheet id={word} />
       <Palette open={palette} onClose={() => setPalette(false)} />
-      {!onboarded && route.page !== "about" && route.page !== "musk" && !splash && <Onboarding />}
+      {!onboarded && route.page !== "about" && route.page !== "musk" && route.page !== "reader" && route.page !== "corpus" && !splash && <Onboarding />}
       {splash && <Splash onDone={() => setSplash(false)} />}
       <Toasts />
       <AmbienceController />

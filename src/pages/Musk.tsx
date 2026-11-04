@@ -4,6 +4,7 @@ import { go } from "../lib/router";
 import { candidates, clock, findSentence, loadManifest, materialize, type Candidates, type Hit, type Manifest } from "../musk/corpus";
 import { ClipPlayer } from "../musk/ClipPlayer";
 import { useVocab, vocab } from "../musk/vocab";
+import { CorpusChip } from "../reader/CorpusChip";
 
 const PAGE = 60;
 const SUGGEST = ["look at", "fundamental", "wow", "actually", "physics", "I think"];
@@ -153,6 +154,9 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
               {more ? "+" : ""} 处 · {videoCount} 个视频
               {muskOnly && hidden > 0 && <span className="musk-hidden"> · 另有 {hidden} 处未确认/非马斯克已隐藏</span>}
             </span>
+          )}
+          {q.trim() && (
+            <CorpusChip q={q} hit={clip?.hit ?? hits[0]} />
           )}
           {hasSpeaker && (
             <label className="musk-toggle" title="按声纹验证：只显示确认是马斯克本人说的句子；关闭后显示全部（含不确定）">
