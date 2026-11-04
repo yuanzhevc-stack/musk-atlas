@@ -1342,7 +1342,7 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
 .cp-pill:hover { transform: scale(1.06); }
 .cp-pill:active { transform: scale(0.94); }
 .cp-body { flex: 1; text-align: left; padding: 14px 8px 14px 12px; border-radius: 12px; }
-.cp-body:hover { background: var(--rd-fill); }
+@media (hover: hover) { .cp-body:hover { background: var(--rd-fill); } }
 .cp-more { margin: 10px 8px 0 0; color: var(--ink-3); }
 .cp-pop {
   position: absolute;
