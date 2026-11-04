@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { MuskText } from "../reader/MuskText";
 import type { Sentence } from "./corpus";
 
 const PAD = 0.3; // must match cut_clips.py
 
 /** Native in-page clip player with live word highlighting (karaoke style). */
-export function ClipPlayer({ sentence, from, to, nonce }: { sentence: Sentence; from: number; to: number; nonce: number }) {
+export function ClipPlayer({ sentence, from, to, nonce, title = "" }: { sentence: Sentence; from: number; to: number; nonce: number; title?: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [t, setT] = useState(-1);
   const clipStart = Math.max(0, sentence.s - PAD);
@@ -18,22 +19,6 @@ export function ClipPlayer({ sentence, from, to, nonce }: { sentence: Sentence; 
   }, [nonce, src]);
 
   const now = clipStart + t;
-  const text = sentence.t;
-  const parts: React.ReactNode[] = [];
-  let last = 0;
-  sentence.w.forEach(([, ws, we, a, b], i) => {
-    if (a > last) parts.push(last >= from && a <= to ? <span key={`g${i}`} className="w-hit">{text.slice(last, a)}</span> : text.slice(last, a));
-    const hit = a >= from && b <= to;
-    const live = t >= 0 && now >= ws && now < Math.max(we, ws + 0.15);
-    parts.push(
-      <span key={i} className={`${hit ? "w-hit" : ""} ${live ? "w-live" : ""}`}>
-        {text.slice(a, b)}
-      </span>,
-    );
-    last = b;
-  });
-  parts.push(text.slice(last));
-
   return (
     <>
       {src ? (
@@ -54,7 +39,9 @@ export function ClipPlayer({ sentence, from, to, nonce }: { sentence: Sentence; 
       ) : (
         <div className="musk-player musk-noclip">这一句还没有剪辑，可以在 YouTube 打开</div>
       )}
-      <p className="musk-stage-text">{parts}</p>
+      <p className="musk-stage-text">
+        <MuskText sentence={sentence} title={title} place="stage" from={from} to={to} now={t >= 0 ? now : undefined} />
+      </p>
     </>
   );
 }

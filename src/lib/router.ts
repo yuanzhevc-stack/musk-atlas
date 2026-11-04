@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import { transition } from "./motion";
 
 export type Route =
-  | { page: "musk"; q?: string }
+  | { page: "musk"; q?: string; c?: string }
   | { page: "reader"; l?: string; s?: string }
   | { page: "corpus" }
   | { page: "today" }
@@ -23,7 +23,7 @@ function parse(hash: string): Location {
   const params = new URLSearchParams(query);
   const word = params.get("w");
   const seg = path.split("/").filter(Boolean);
-  let route: Route = { page: "musk", q: params.get("q") || undefined };
+  let route: Route = { page: "musk", q: params.get("q") || undefined, c: params.get("c") || undefined };
   if (seg[0] === "today") route = { page: "today" };
   else if (seg[0] === "reader") route = { page: "reader", l: params.get("l") || undefined, s: params.get("s") || undefined };
   else if (seg[0] === "corpus") route = { page: "corpus" };
@@ -46,6 +46,7 @@ export function href(route: Route, word?: string | null) {
     if (route.view) params.set("view", route.view);
   }
   if (route.page === "musk" && route.q) params.set("q", route.q);
+  if (route.page === "musk" && route.c) params.set("c", route.c);
   if (route.page === "reader") {
     if (route.l) params.set("l", route.l);
     if (route.s) params.set("s", route.s);

@@ -1,10 +1,12 @@
 import { Bookmark, BookmarkCheck, Play, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { go } from "../lib/router";
-import { candidates, clock, findSentence, loadManifest, materialize, type Candidates, type Hit, type Manifest } from "../musk/corpus";
+import { candidates, clock, sentence, findSentence, loadManifest, materialize, type Candidates, type Hit, type Manifest } from "../musk/corpus";
 import { ClipPlayer } from "../musk/ClipPlayer";
 import { useVocab, vocab } from "../musk/vocab";
 import { CorpusChip } from "../reader/CorpusChip";
+import { MuskText } from "../reader/MuskText";
+import { gsel } from "../reader/select";
 
 const PAGE = 60;
 const SUGGEST = ["look at", "fundamental", "wow", "actually", "physics", "I think"];
@@ -12,16 +14,6 @@ const SUGGEST = ["look at", "fundamental", "wow", "actually", "physics", "I thin
 interface Clip {
   hit: Hit;
   nonce: number;
-}
-
-function Highlight({ text, from, to }: { text: string; from: number; to: number }) {
-  return (
-    <>
-      {text.slice(0, from)}
-      <mark>{text.slice(from, to)}</mark>
-      {text.slice(to)}
-    </>
-  );
 }
 
 export function SpeakerBadge({ m, p }: { m: Hit["sentence"]["m"]; p: number | null }) {
@@ -34,7 +26,7 @@ export function SpeakerBadge({ m, p }: { m: Hit["sentence"]["m"]; p: number | nu
   );
 }
 
-export function MuskPage({ q: initial = "" }: { q?: string }) {
+export function MuskPage({ q: initial = "", c }: { q?: string; c?: string }) {
   const [corpus, setCorpus] = useState<Manifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState(initial);
@@ -47,8 +39,21 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
 
   useEffect(() => {
     loadManifest().then(setCorpus, (e: Error) => setError(e.message));
-    input.current?.focus();
+    if (!c) input.current?.focus();
   }, []);
+
+  // Deep link from the corpus (#/?q=..&c=<sentence id>): open that exact clip.
+  useEffect(() => {
+    const id = Number(c);
+    if (!corpus || !c || !Number.isFinite(id)) return;
+    sentence(id).then(
+      (s) => {
+        const i = initial ? s.t.toLowerCase().indexOf(initial.toLowerCase()) : -1;
+        setClip({ hit: { id: `c:${id}`, sentence: s, video: corpus.videos[s.v], start: s.s, end: s.e, from: Math.max(0, i), to: i < 0 ? 0 : i + initial.length }, nonce: Date.now() });
+      },
+      () => null,
+    );
+  }, [corpus, c]);
 
   // Keep the query in the hash so a search can be bookmarked.
   useEffect(() => {
@@ -98,7 +103,7 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
   // playphrase-style keys: ↓/↑ next/prev (auto-play), Enter/Space replay.
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || gsel.get()) return;
       const typing = (e.target as HTMLElement).tagName === "INPUT" && (e.target as HTMLInputElement).type !== "checkbox";
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         if (!hits.length) return;
@@ -183,7 +188,7 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
                   </span>
                   <span className="musk-hit-body">
                     <span className="musk-sentence">
-                      <Highlight text={h.sentence.t} from={h.from} to={h.to} />
+                      <MuskText sentence={h.sentence} title={h.video.title} place="hit" from={h.from} to={h.to} />
                     </span>
                     <span className="musk-source">
                       {h.video.title} · {clock(h.start)}
@@ -216,7 +221,7 @@ export function MuskPage({ q: initial = "" }: { q?: string }) {
 
         {clip && (
           <aside className="musk-stage" aria-label="播放器">
-            <ClipPlayer sentence={clip.hit.sentence} from={clip.hit.from} to={clip.hit.to} nonce={clip.nonce} />
+            <ClipPlayer sentence={clip.hit.sentence} from={clip.hit.from} to={clip.hit.to} nonce={clip.nonce} title={clip.hit.video.title} />
             <p className="musk-source">
               {index >= 0 && `${index + 1} / ${hits.length} · `}
               {clip.hit.video.title} · {clock(clip.hit.start)}

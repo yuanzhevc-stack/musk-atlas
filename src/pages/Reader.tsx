@@ -1,10 +1,11 @@
-import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, ExternalLink, Plus, Trash2, Volume2, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, ExternalLink, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAtlas } from "../atlas/context";
-import { go, openWord } from "../lib/router";
-import { lexicon, lookup, speak, type Def } from "../reader/dict";
+import { go } from "../lib/router";
+import { speak } from "../reader/dict";
+import { StatusPicker, WordCard, type Sel } from "../reader/WordCard";
+export { StatusPicker };
 import { lessonStats, normalize, parse, phraseIndex, reader, useReader, type Context, type Item, type Lesson, type Status, type Token } from "../reader/model";
-import { MuskSays } from "../reader/MuskSays";
+import { gsel } from "../reader/select";
 import { Sheet } from "../ui/Sheet";
 import { toast } from "../ui/Toast";
 
@@ -139,7 +140,6 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
 
 /* ---------- lesson ---------- */
 
-type Sel = { from: number; to: number };
 const isWord = (t: Token) => !!t.key;
 const statusClass = (it?: Item) => (!it ? "s-new" : it.status === 5 ? "s-known" : it.status === -1 ? "s-ign" : `s-${it.status}`);
 
@@ -159,6 +159,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   const anchor = useRef<number | null>(null);
   const drag = useRef<{ start: number; moved: boolean } | null>(null);
   const textRef = useRef<HTMLDivElement>(null);
+  const best = useRef("");
 
   const pg = doc.pages[page] ?? { from: 0, to: 0, words: 0 };
   const paras = doc.paragraphs.slice(pg.from, pg.to);
@@ -225,7 +226,8 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
 
   const setStatus = (s: Status) => {
     if (!sel || !selKey) return;
-    reader.setStatus(selText, s, selCtx);
+    const prev = reader.item(selKey);
+    reader.upsert(selText, { status: s, ...(s >= 1 && s <= 4 && !prev?.meaning && best.current ? { meaning: best.current } : {}) }, selCtx);
     if (s === 5 || s === -1) nav(1);
   };
 
@@ -255,7 +257,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
         if (e.key === "Escape") t.blur();
         return;
       }
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || gsel.get()) return;
       const k = e.key;
       let hit = true;
       if (k === "ArrowRight" && e.shiftKey) turn(1);
@@ -398,7 +400,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
 
         <aside className={`rd-aside ${sel ? "is-open" : ""}`} aria-label="词卡">
           {sel && selKey ? (
-            <Panel
+            <WordCard
               key={selKey}
               text={selText}
               k={selKey}
@@ -414,6 +416,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
               onPick={(r) => setSel(r)}
               onStatus={setStatus}
               onClose={() => setSel(null)}
+              best={best}
             />
           ) : (
             <div className="rd-empty">
@@ -439,211 +442,3 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   );
 }
 
-/* ---------- word / phrase panel ---------- */
-
-export function StatusPicker({ value, onChange }: { value: Status | 0; onChange: (s: Status) => void }) {
-  const opts: [Status, React.ReactNode, string][] = [
-    [1, "1", "新"],
-    [2, "2", "认得"],
-    [3, "3", "熟悉"],
-    [4, "4", "掌握"],
-    [5, <Check key="k" size={15} />, "已知"],
-    [-1, <X key="x" size={15} />, "忽略"],
-  ];
-  return (
-    <div className="rd-status" role="radiogroup" aria-label="状态">
-      {opts.map(([s, icon, label]) => (
-        <button key={s} role="radio" aria-checked={value === s} className={`st-${s} ${value === s ? "is-on" : ""}`} onClick={() => onChange(s)} title={label} data-testid={`status-${s}`}>
-          {icon}
-          <small>{label}</small>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Panel({
-  text,
-  k,
-  ctx,
-  phrase,
-  autoMusk,
-  canExtend,
-  onExtend,
-  onPick,
-  onStatus,
-  onClose,
-}: {
-  text: string;
-  k: string;
-  ctx: Context;
-  phrase?: { from: number; to: number; key: string };
-  autoMusk: number;
-  canExtend: { left: boolean; right: boolean };
-  onExtend: (d: 1 | -1) => void;
-  onPick: (r: Sel) => void;
-  onStatus: (s: Status) => void;
-  onClose: () => void;
-}) {
-  const st = useReader();
-  const atlas = useAtlas();
-  const it = st.items[k];
-  const isPhrase = k.includes(" ");
-  const lex = useMemo(() => (isPhrase ? null : lexicon(atlas, k)), [atlas, k, isPhrase]);
-  const [dict, setDict] = useState<{ ipa?: string; defs: Def[] } | null | undefined>(undefined);
-  const [hint, setHint] = useState(0);
-  const [showMusk, setShowMusk] = useState(false);
-  useEffect(() => {
-    let live = true;
-    if (k.split(" ").length > 2) setDict({ defs: [] });
-    else lookup(k).then((d) => live && setDict(d));
-    return () => {
-      live = false;
-    };
-  }, [k]);
-  useEffect(() => {
-    if (autoMusk) setShowMusk(true);
-  }, [autoMusk]);
-
-  const hints = [...(lex ? [lex.zh] : []), ...(dict?.defs.map((d) => d.text) ?? [])].filter(Boolean).slice(0, 6);
-  const save = (patch: Partial<Item>) => reader.upsert(text, { status: it?.status ?? 1, ...patch }, ctx);
-  const accept = (h: string) => save({ meaning: !it?.meaning ? h : it.meaning.includes(h) ? it.meaning : `${it.meaning}；${h}` });
-
-  useEffect(() => {
-    const on = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || e.metaKey || e.ctrlKey || e.shiftKey) return;
-      if (e.key === "ArrowDown" && hints.length) {
-        e.preventDefault();
-        setHint((h) => Math.min(hints.length - 1, h + 1));
-      } else if (e.key === "ArrowUp" && hints.length) {
-        e.preventDefault();
-        setHint((h) => Math.max(0, h - 1));
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        if (hints[hint]) accept(hints[hint]);
-        else save({});
-      }
-    };
-    window.addEventListener("keydown", on);
-    return () => window.removeEventListener("keydown", on);
-  });
-
-  const sentence = ctx.sentence;
-  const at = sentence.toLowerCase().indexOf(text.toLowerCase());
-
-  return (
-    <div className="rd-panel" data-testid="panel">
-      <span className="rd-grip" aria-hidden="true" />
-      <header className="rd-panel-head">
-        <div>
-          <h3 data-testid="panel-word">{text}</h3>
-          <p className="rd-dim">
-            {isPhrase ? "短语" : dict?.ipa ?? ""}
-            {!it && <span className="rd-pill rd-pill-new">新词</span>}
-            {it && <span className={`rd-pill st-${it.status}`}>{it.status === 5 ? "已知" : it.status === -1 ? "忽略" : `等级 ${it.status}`}</span>}
-          </p>
-        </div>
-        <div className="rd-panel-tools">
-          <button className="rd-icon" onClick={() => speak(text)} aria-label="发音">
-            <Volume2 size={17} />
-          </button>
-          <button className="rd-icon" onClick={onClose} aria-label="关闭">
-            <X size={17} />
-          </button>
-        </div>
-      </header>
-
-      <StatusPicker value={it?.status ?? 0} onChange={onStatus} />
-
-      {!it && (
-        <button className="rd-btn rd-btn-primary rd-save" onClick={() => save({ meaning: hints[0] && !isPhrase ? hints[0] : "" })} data-testid="save">
-          <Plus size={16} /> {isPhrase ? "保存短语" : "加入语料库"}
-        </button>
-      )}
-
-      <div className="rd-extend">
-        <button disabled={!canExtend.left} onClick={() => onExtend(-1)}>
-          ‹ 向前扩展
-        </button>
-        <button disabled={!canExtend.right} onClick={() => onExtend(1)} data-testid="extend-right">
-          向后扩展 ›
-        </button>
-      </div>
-      {phrase && phrase.key !== k && (
-        <button className="rd-chip" onClick={() => onPick({ from: phrase.from, to: phrase.to })}>
-          短语 · {phrase.key}
-        </button>
-      )}
-
-      <label className="rd-field">
-        <span>释义</span>
-        <textarea
-          data-meaning
-          rows={2}
-          value={it?.meaning ?? ""}
-          placeholder={hints[0] ? `点下方释义，或自己写` : "写下你的释义"}
-          onChange={(e) => save({ meaning: e.target.value })}
-          data-testid="meaning"
-        />
-      </label>
-
-      {(hints.length > 0 || dict === undefined) && (
-        <ul className="rd-hints">
-          {lex && (
-            <li>
-              <button className={hint === 0 ? "is-on" : ""} onClick={() => accept(lex.zh)}>
-                <em>词库</em>
-                {lex.zh}
-              </button>
-              <button className="rd-link" onClick={() => openWord(lex.id)}>
-                详情
-              </button>
-            </li>
-          )}
-          {dict?.defs.slice(0, lex ? 5 : 6).map((d, j) => {
-            const idx = j + (lex ? 1 : 0);
-            return (
-              <li key={j}>
-                <button className={hint === idx ? "is-on" : ""} onClick={() => accept(d.text)}>
-                  <em>{d.pos}</em>
-                  {d.text}
-                </button>
-              </li>
-            );
-          })}
-          {dict === undefined && <li className="rd-dim">词典查询中…</li>}
-        </ul>
-      )}
-      {dict === null && !lex && <p className="rd-dim">在线词典暂时不可用，可以自己写释义</p>}
-
-      <label className="rd-field">
-        <span>笔记</span>
-        <textarea rows={2} value={it?.notes ?? ""} placeholder="例句、联想、用法…" onChange={(e) => save({ notes: e.target.value })} />
-      </label>
-
-      <figure className="rd-ctx">
-        <figcaption>原句</figcaption>
-        <blockquote>
-          {at >= 0 ? (
-            <>
-              {sentence.slice(0, at)}
-              <mark>{sentence.slice(at, at + text.length)}</mark>
-              {sentence.slice(at + text.length)}
-            </>
-          ) : (
-            sentence
-          )}
-        </blockquote>
-      </figure>
-
-      {showMusk ? (
-        <MuskSays q={k} autoplay={!!autoMusk} />
-      ) : (
-        <button className="rd-btn rd-btn-musk" onClick={() => setShowMusk(true)} data-testid="musk-open">
-          ▶ Musk 怎么说
-        </button>
-      )}
-    </div>
-  );
-}

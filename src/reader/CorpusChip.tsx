@@ -1,5 +1,6 @@
 /** Musk page -> 我的语料库: shows the query's corpus status, or adds it with the Musk sentence as context. */
 import type { Hit } from "../musk/corpus";
+import { muskContext } from "./MuskText";
 import { normalize, reader, useReader } from "./model";
 
 export function CorpusChip({ q, hit }: { q: string; hit?: Hit }) {
@@ -18,7 +19,7 @@ export function CorpusChip({ q, hit }: { q: string; hit?: Hit }) {
       className="rd-chip"
       data-testid="corpus-add"
       onClick={() =>
-        reader.upsert(q.trim(), { status: 1 }, hit ? { lesson: "musk", title: hit.video?.title ?? hit.sentence.v, sid: hit.sentence.id, sentence: hit.sentence.t, musk: { v: hit.sentence.v, t: hit.sentence.s } } : undefined)
+        reader.upsert(q.trim(), { status: 1 }, hit ? muskContext(hit.sentence, hit.video?.title ?? hit.sentence.v) : undefined)
       }
     >
       + 加入语料库

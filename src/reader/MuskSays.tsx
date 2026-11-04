@@ -3,6 +3,7 @@ import { Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { candidates, clock, materialize, type Hit } from "../musk/corpus";
 import { ClipPlayer } from "../musk/ClipPlayer";
+import { MuskText } from "./MuskText";
 
 export interface MuskResult {
   hits: Hit[];
@@ -73,7 +74,7 @@ export function MuskSays({ q, autoplay = false, compact = false }: { q: string; 
         <>
           {on && (
             <div className="rd-musk-stage">
-              <ClipPlayer sentence={on.hit.sentence} from={on.hit.from} to={on.hit.to} nonce={on.nonce} />
+              <ClipPlayer sentence={on.hit.sentence} from={on.hit.from} to={on.hit.to} nonce={on.nonce} title={on.hit.video.title} />
             </div>
           )}
           <ol className="rd-musk-list">
@@ -84,9 +85,7 @@ export function MuskSays({ q, autoplay = false, compact = false }: { q: string; 
                     <Play size={11} fill="currentColor" />
                   </span>
                   <span className="rd-musk-text">
-                    {h.sentence.t.slice(0, h.from)}
-                    <mark>{h.sentence.t.slice(h.from, h.to)}</mark>
-                    {h.sentence.t.slice(h.to)}
+                    <MuskText sentence={h.sentence} title={h.video?.title ?? h.sentence.v} place="says" from={h.from} to={h.to} />
                     <small>
                       {h.video?.title ?? h.sentence.v} · {clock(h.sentence.s)}
                       {h.sentence.m === "uncertain" ? " · 未确认" : ""}

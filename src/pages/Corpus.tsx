@@ -4,6 +4,8 @@ import { clock } from "../musk/corpus";
 import { useVocab } from "../musk/vocab";
 import { normalize, reader, useReader, type Item } from "../reader/model";
 import { MuskSays } from "../reader/MuskSays";
+import { useMeanings } from "../reader/dict";
+import { MeaningList } from "../reader/Meanings";
 import { Rating, formatInterval, preview, type Grade } from "../store/srs";
 import { Sheet } from "../ui/Sheet";
 import { toast } from "../ui/Toast";
@@ -167,7 +169,7 @@ export function CorpusPage() {
 
 function sourceHref(it: Item) {
   if (!it.ctx) return null;
-  if (it.ctx.musk) return `#/?q=${encodeURIComponent(it.key)}`;
+  if (it.ctx.musk) return `#/?q=${encodeURIComponent(it.key)}${it.ctx.sid ? `&c=${it.ctx.sid}` : ""}`;
   return `#/reader?l=${it.ctx.lesson}&s=${it.ctx.sid}`;
 }
 
@@ -207,6 +209,7 @@ function CorpusRow({ it, open, onToggle }: { it: Item; open: boolean; onToggle: 
             <span>释义</span>
             <textarea rows={2} value={it.meaning} onChange={(e) => reader.upsert(it.text, { meaning: e.target.value })} />
           </label>
+          <RowMeanings it={it} />
           <label className="rd-field">
             <span>笔记</span>
             <textarea rows={2} value={it.notes} onChange={(e) => reader.upsert(it.text, { notes: e.target.value })} />
@@ -285,4 +288,9 @@ function ReviewSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
       )}
     </Sheet>
   );
+}
+
+function RowMeanings({ it }: { it: Item }) {
+  const m = useMeanings(it.key);
+  return <MeaningList m={m} onPick={(t) => reader.upsert(it.text, { meaning: !it.meaning ? t : it.meaning.includes(t) ? it.meaning : `${it.meaning}；${t}` })} />;
 }

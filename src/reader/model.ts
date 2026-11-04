@@ -20,7 +20,7 @@ export interface Context {
   sid: number;
   sentence: string;
   /** Musk source (videoId@seconds) when the context is a Musk clip. */
-  musk?: { v: string; t: number };
+  musk?: { v: string; t: number; ms?: number };
 }
 
 export interface Item {

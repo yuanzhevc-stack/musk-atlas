@@ -7,6 +7,7 @@ import { REPO_URL, UPSTREAM_URL } from "./config";
 import { closeWord, currentLocation, go, openWord, useLocation, type Route } from "./lib/router";
 import { AtlasPage } from "./pages/Atlas";
 import { MuskPage } from "./pages/Musk";
+import { GlobalCard } from "./reader/GlobalCard";
 import { ReaderPage } from "./pages/Reader";
 import { CorpusPage } from "./pages/Corpus";
 import { About } from "./pages/About";
@@ -160,7 +161,7 @@ function Shell({ privateAvailable }: { privateAvailable: boolean }) {
       )}
 
       <main className="main" id="main">
-        {route.page === "musk" && <MuskPage q={route.q} />}
+        {route.page === "musk" && <MuskPage q={route.q} c={route.c} />}
         {route.page === "reader" && <ReaderPage l={route.l} s={route.s} />}
         {route.page === "corpus" && <CorpusPage />}
         {route.page === "today" && <Today />}
@@ -170,6 +171,7 @@ function Shell({ privateAvailable }: { privateAvailable: boolean }) {
         {route.page === "me" && <Me privateAvailable={privateAvailable} />}
         {route.page === "about" && <About />}
       </main>
+      <GlobalCard />
 
       {!focus && (
         <footer className="footer">
@@ -179,7 +181,11 @@ function Shell({ privateAvailable }: { privateAvailable: boolean }) {
             <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">
               CC BY 4.0
             </a>
-            （已修改：移除插画与录音）·{" "}
+            （已修改：移除插画与录音）· 离线词典{" "}
+            <a href="https://github.com/skywind3000/ECDICT" target="_blank" rel="noreferrer">
+              ECDICT
+            </a>
+            （MIT）·{" "}
             <a href={REPO_URL} target="_blank" rel="noreferrer">
               GitHub
             </a>{" "}
