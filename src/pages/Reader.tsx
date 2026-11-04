@@ -397,27 +397,24 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
           )}
           <div ref={textRef} className={`rd-text ${tt.sid != null ? "is-reading" : ""}`} style={{ fontSize: size }} data-testid="reader-text">
             {paras.map((p, pi) => (
-              <p key={pg.from + pi}>
-                {p.tokens.map((t, ti) => {
+              <p key={pg.from + pi} className={p.cont ? "rd-cont" : undefined}>
+                {bySentence(p.tokens).map((g) => (
+                <span key={g[0].sid} className={`rd-sent${tt.sid === g[0].sid ? " is-on" : ""}`} data-sent={g[0].sid} data-testid="sent">
+                  <button
+                    className={`rd-say ${tt.sid === g[0].sid ? "is-on" : ""}`}
+                    onClick={() => (tt.sid === g[0].sid && !tt.loading ? tts.stop() : playFrom(g[0].sid, tt.auto))}
+                    aria-label="朗读这句"
+                    data-testid="say"
+                  >
+                    {tt.sid === g[0].sid ? <Pause size={10} fill="currentColor" /> : <Play size={10} fill="currentColor" />}
+                  </button>
+                {g.map((t) => {
                   const ph = phraseAt.get(t.i);
                   const inSel = !!sel && t.i >= sel.from && t.i <= sel.to;
                   const fl = (flash === t.sid ? " is-flash" : "") + (tt.sid === t.sid ? " is-say" : "");
-                  const say =
-                    ti === 0 || p.tokens[ti - 1].sid !== t.sid ? (
-                      <button
-                        key={`say${t.sid}`}
-                        className={`rd-say ${tt.sid === t.sid ? "is-on" : ""}`}
-                        onClick={() => (tt.sid === t.sid && !tt.loading ? tts.stop() : playFrom(t.sid, tt.auto))}
-                        aria-label="朗读这句"
-                        data-testid="say"
-                      >
-                        {tt.sid === t.sid ? <Pause size={10} fill="currentColor" /> : <Play size={10} fill="currentColor" />}
-                      </button>
-                    ) : null;
                   if (!isWord(t))
                     return (
                       <Fragment key={t.i}>
-                        {say}
                         <span data-sid={t.sid} className={`${ph && t.i > ph.from && t.i < ph.to ? "ph" : ""}${inSel ? " in-sel" : ""}${fl}`}>
                           {t.text}
                         </span>
@@ -426,7 +423,6 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
                   const it = st.items[t.key!];
                   return (
                     <Fragment key={t.i}>
-                    {say}
                     <span
                       data-ti={t.i}
                       data-sid={t.sid}
@@ -452,6 +448,8 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
                     </Fragment>
                   );
                 })}
+                </span>
+                ))}
               </p>
             ))}
           </div>
@@ -550,3 +548,13 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   );
 }
 
+/** Group a paragraph's tokens into sentences (one line each in the reader). */
+function bySentence(tokens: Token[]): Token[][] {
+  const out: Token[][] = [];
+  for (const t of tokens) {
+    const g = out[out.length - 1];
+    if (g && g[0].sid === t.sid) g.push(t);
+    else out.push([t]);
+  }
+  return out;
+}

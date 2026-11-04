@@ -363,8 +363,18 @@
   -webkit-touch-callout: none;
 }
 .rd-text p {
-  margin: 0 0 1.05em;
+  margin: 0 0 1.15em;
 }
+.rd-text p.rd-cont { margin-top: -0.75em; }
+/* One sentence per line, with the ▶ hanging in the margin. */
+.rd-text .rd-sent {
+  display: block;
+  position: relative;
+  padding-left: 1.6em;
+  margin: 0 0 0.55em;
+  border-radius: 10px;
+}
+.rd-text .rd-sent:last-child { margin-bottom: 0; }
 .rd-text .w,
 .rd-legend .w {
   border-radius: 5px;
@@ -995,11 +1005,13 @@
   place-items: center;
   width: 1.05em;
   height: 1.05em;
-  margin: 0 0.28em 0 0.05em;
+  position: absolute;
+  left: 0;
+  top: 0.63em;
+  margin: 0;
   padding: 0;
   border: 0;
   border-radius: 50%;
-  vertical-align: 0.06em;
   font-size: 0.82em;
   color: var(--rd-blue-ink);
   background: color-mix(in oklab, var(--rd-blue-ink) 10%, transparent);
@@ -1008,7 +1020,7 @@
   transition: opacity 0.2s, background 0.2s;
 }
 .rd-say svg { width: 0.5em; height: 0.5em; }
-.rd-text p:hover .rd-say, .rd-say.is-on { opacity: 1; }
+.rd-text .rd-sent:hover .rd-say, .rd-say.is-on { opacity: 1; }
 .rd-say.is-on { color: #fff; background: var(--rd-blue-ink); }
 @media (hover: none) { .rd-say { opacity: 0.7; } }
 .rd-text .is-say { background-image: linear-gradient(color-mix(in oklab, var(--rd-blue-ink) 9%, transparent), color-mix(in oklab, var(--rd-blue-ink) 9%, transparent)); }
@@ -1060,5 +1072,5 @@
 @media (max-width: 600px) {
   .rd-tts-auto { padding: 0 10px; }
 }
-.rd-text.is-reading span:not(.is-say) { opacity: 0.42; transition: opacity 0.3s; }
+.rd-text.is-reading .rd-sent > span:not(.is-say) { opacity: 0.42; transition: opacity 0.3s; }
 .rd-text span { transition: opacity 0.3s; }

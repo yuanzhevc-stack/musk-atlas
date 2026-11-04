@@ -186,6 +186,8 @@ export interface Token {
 }
 export interface Paragraph {
   tokens: Token[];
+  /** Continuation of the previous source paragraph (a long paragraph split for paging). */
+  cont?: boolean;
 }
 export interface Parsed {
   paragraphs: Paragraph[];
@@ -198,17 +200,50 @@ export interface Parsed {
 const WORD = /[A-Za-z]+(?:['\u2019][A-Za-z]+)*/g;
 export const PAGE_WORDS = 220;
 
+const ABBR = new Set(
+  "mr mrs ms dr prof sr jr st mt vs etc e.g i.e cf al approx dept est fig inc ltd co corp no nos vol p pp ph.d u.s u.k u.n u.s.a e.u a.m p.m jan feb mar apr jun jul aug sep sept oct nov dec gen col lt sgt rev gov sen rep".split(" "),
+);
+/** Sentence split that keeps abbreviations (Mr., U.S., e.g.), initials (J. K.) and decimals (3.5) inside the sentence. */
+export function splitSentences(p: string): string[] {
+  const out: string[] = [];
+  const re = /[.!?…]+["'”’)\]]*(\s+)/g;
+  let start = 0;
+  for (const m of p.matchAll(re)) {
+    const end = (m.index ?? 0) + m[0].length;
+    const punct = m[0].trim();
+    const before = p.slice(start, m.index).match(/([A-Za-z][A-Za-z.]*)$/)?.[1] ?? "";
+    const next = p.slice(end, end + 2);
+    if (punct.startsWith(".") && !/^\.{2,}/.test(punct)) {
+      const w = before.toLowerCase();
+      if (ABBR.has(w) || ABBR.has(w.replace(/\.$/, ""))) continue; // Mr. / U.S. / e.g.
+      if (/^[A-Z]$/.test(before)) continue; // initials: J. K. Rowling
+      if (/^[A-Za-z](\.[A-Za-z])+$/.test(before)) continue; // a.k.a / U.S.A
+    }
+    if (next && !/^["'“‘(\[]?[A-Z0-9一-鿿]/.test(next)) continue; // next must start a sentence
+    out.push(p.slice(start, end));
+    start = end;
+  }
+  if (start < p.length) out.push(p.slice(start));
+  return out.filter((x) => x.trim());
+}
+
 export function parse(text: string): Parsed {
   const paras = text.replace(/\r/g, "").split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean);
   const sentences: string[] = [];
   const paragraphs: Paragraph[] = [];
   let i = 0;
   for (const p of paras) {
-    const tokens: Token[] = [];
-    // Split into sentences, keeping punctuation with the sentence.
-    const parts = p.match(/[^.!?]+(?:[.!?]+["'\u201d\u2019)]*|$)\s*/g) ?? [p];
-    for (const s of parts) {
-      if (!s.trim()) continue;
+    let tokens: Token[] = [];
+    let words = 0;
+    let cont = false;
+    for (const s of splitSentences(p)) {
+      // Split very long paragraphs (pasted transcripts) at sentence boundaries so paging stays even.
+      if (words >= PAGE_WORDS && tokens.length) {
+        paragraphs.push({ tokens, ...(cont ? { cont } : {}) });
+        tokens = [];
+        words = 0;
+        cont = true;
+      }
       const sid = sentences.length;
       sentences.push(s.trim());
       let last = 0;
@@ -216,11 +251,12 @@ export function parse(text: string): Parsed {
         const at = m.index ?? 0;
         if (at > last) tokens.push({ i: i++, text: s.slice(last, at), sid });
         tokens.push({ i: i++, text: m[0], key: normalize(m[0]), sid });
+        words++;
         last = at + m[0].length;
       }
       if (last < s.length) tokens.push({ i: i++, text: s.slice(last), sid });
     }
-    paragraphs.push({ tokens });
+    paragraphs.push({ tokens, ...(cont ? { cont } : {}) });
   }
   const pages: Parsed["pages"] = [];
   let from = 0;
