@@ -44,6 +44,8 @@ export interface Lesson {
   created: number;
   opened?: number;
   page?: number;
+  /** Sentence-view position. */
+  sid?: number;
   /** Imported from YouTube: video id + start time (seconds) of every sentence (by sid). */
   yt?: { v: string; times: number[]; kind: "manual" | "asr"; author?: string };
 }

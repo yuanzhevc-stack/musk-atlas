@@ -1,7 +1,7 @@
-import { ArrowLeft, BookOpen, Bookmark, Youtube, X as Close, Check, ChevronLeft, ChevronRight, ExternalLink, Pause, Play, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Bookmark, Youtube, X as Close, Check, ChevronLeft, Languages, ChevronRight, ExternalLink, Pause, Play, Plus, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { go } from "../lib/router";
-import { speak } from "../reader/dict";
+import { speak, translate } from "../reader/dict";
 import { muskLookup } from "../reader/MuskSays";
 import { prefetch, RATES, tts, useTts } from "../reader/tts";
 import { StatusPicker, WordCard, type Sel } from "../reader/WordCard";
@@ -163,6 +163,8 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
 /* ---------- lesson ---------- */
 
 const isWord = (t: Token) => !!t.key;
+const VIEW_KEY = "musk-atlas:reader:view";
+const TR_KEY = "musk-atlas:reader:tr";
 const statusClass = (it?: Item) => (!it ? "s-new" : it.status === 5 ? "s-known" : it.status === -1 ? "s-ign" : `s-${it.status}`);
 
 function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number }) {
@@ -179,6 +181,15 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   const [size, setSize] = useState(() => Number(localStorage.getItem("musk-atlas:reader:size")) || 21);
   const [autoMusk, setAutoMusk] = useState(0);
   const [video, setVideo] = useState<{ t: number; n: number } | null>(null);
+  const [mode, setModeRaw] = useState<"sentence" | "page">(() => (localStorage.getItem(VIEW_KEY) === "page" ? "page" : "sentence"));
+  const [cur, setCur] = useState(() => {
+    const n = doc.sentences.length;
+    const want = focusSid ?? lesson.sid ?? doc.paragraphs[doc.pages[Math.max(0, startPage)]?.from ?? 0]?.tokens[0]?.sid ?? 0;
+    return Math.max(0, Math.min(n - 1, want));
+  });
+  const [showTr, setShowTr] = useState(() => localStorage.getItem(TR_KEY) === "1");
+  const [tr, setTr] = useState<Record<number, string>>({});
+  const swipe = useRef<{ x: number; y: number } | null>(null);
   const anchor = useRef<number | null>(null);
   const drag = useRef<{ start: number; moved: boolean } | null>(null);
   const textRef = useRef<HTMLDivElement>(null);
@@ -187,10 +198,23 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
 
   const pg = doc.pages[page] ?? { from: 0, to: 0, words: 0 };
   const paras = doc.paragraphs.slice(pg.from, pg.to);
-  const tokens = useMemo(() => paras.flatMap((p) => p.tokens), [paras]);
   const all = useMemo(() => doc.paragraphs.flatMap((p) => p.tokens), [doc]);
+  const tokens = useMemo(
+    () => (mode === "sentence" ? all.filter((t) => t.sid === cur) : paras.flatMap((p) => p.tokens)),
+    [mode, cur, all, paras],
+  );
 
-  useEffect(() => reader.updateLesson(lesson.id, { page, opened: Date.now() }), [page, lesson.id]);
+  useEffect(() => reader.updateLesson(lesson.id, { page, sid: cur, opened: Date.now() }), [page, cur, lesson.id]);
+  useEffect(() => localStorage.setItem(TR_KEY, showTr ? "1" : "0"), [showTr]);
+  useEffect(() => {
+    if (!showTr || mode !== "sentence" || tr[cur] != null) return;
+    let live = true;
+    const at = cur;
+    translate(doc.sentences[at]).then((t) => live && setTr((m) => ({ ...m, [at]: t ?? "翻译暂不可用" })));
+    return () => {
+      live = false;
+    };
+  }, [showTr, cur, mode]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => localStorage.setItem("musk-atlas:reader:size", String(size)), [size]);
   useEffect(() => {
     if (flash == null) return;
@@ -284,7 +308,10 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
       if (e.metaKey || e.ctrlKey || e.altKey || gsel.get()) return;
       const k = e.key;
       let hit = true;
-      if (k === "ArrowRight" && e.shiftKey) turn(1);
+      if (mode === "sentence" && (k === "ArrowRight" || k === "ArrowLeft")) goSent(k === "ArrowRight" ? 1 : -1);
+      else if (mode === "sentence" && (k === "ArrowDown" || k === "ArrowUp")) nav(k === "ArrowDown" ? 1 : -1);
+      else if (mode === "sentence" && k === "t") setShowTr((x) => !x);
+      else if (k === "ArrowRight" && e.shiftKey) turn(1);
       else if (k === "ArrowLeft" && e.shiftKey) turn(-1);
       else if (k === "ArrowRight") nav(1);
       else if (k === "ArrowLeft") nav(-1);
@@ -327,8 +354,9 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
     tts.setAuto(auto);
     for (let s = sid; s < doc.sentences.length; s++) {
       const pi = sidPage.get(s);
-      if (pi != null && pi !== page) setPage(pi);
-      requestAnimationFrame(() => document.querySelector(`[data-sid="${s}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+      if (pi != null) setPage(pi);
+      if (modeRef.current === "sentence") setCur(s);
+      else requestAnimationFrame(() => document.querySelector(`[data-sid="${s}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
       if (auto && s + 1 < doc.sentences.length) prefetch(doc.sentences[s + 1]).catch(() => null);
       const done = await tts.play(s, doc.sentences[s]);
       if (!done || !auto) return done && tts.stop();
@@ -337,6 +365,45 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   };
   useEffect(() => () => tts.stop(), []);
   const firstSid = tokens[0]?.sid ?? 0;
+
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const goSent = (d: 1 | -1) => {
+    const n = cur + d;
+    if (n < 0 || n >= doc.sentences.length) return;
+    setSel(null);
+    setCur(n);
+    const pi = sidPage.get(n);
+    if (pi != null) setPage(pi);
+    if (tt.auto) playFrom(n, true);
+    else if (tt.sid != null) tts.stop();
+  };
+  const switchMode = (m: "sentence" | "page") => {
+    if (m === mode) return;
+    localStorage.setItem(VIEW_KEY, m);
+    if (m === "sentence") {
+      let s = sel ? all[sel.from].sid : tt.sid;
+      if (s == null) {
+        const vis = [...document.querySelectorAll<HTMLElement>("[data-sent]")].find((el) => el.getBoundingClientRect().bottom > 90);
+        s = vis ? Number(vis.dataset.sent) : firstSid;
+      }
+      setCur(s);
+      window.scrollTo({ top: 0 });
+    } else {
+      const pi = sidPage.get(cur);
+      if (pi != null) setPage(pi);
+      setFlash(cur);
+    }
+    setModeRaw(m);
+  };
+  const lessonDone = () => {
+    const blue = [...new Set(all.filter((t) => isWord(t) && !st.items[t.key!]).map((t) => t.text))];
+    reader.markKnown(blue);
+    toast(blue.length ? `读完了 · ${blue.length} 个蓝词已标为已知` : "读完了", "ok");
+    tts.stop();
+    setSel(null);
+    go({ page: "reader" });
+  };
   const toggleAuto = () => (tt.auto ? tts.stop() : playFrom(sel ? all[sel.from].sid : tt.sid ?? firstSid, true));
 
   // Learning words / phrases in the sentence being read that Musk has verified clips for.
@@ -364,7 +431,84 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
     return () => {
       live = false;
     };
-  }, [tt.sid, page, st.items]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tt.sid, page, cur, mode, st.items]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const renderSent = (g: Token[], bare = false) => (
+                <span key={g[0].sid} className={`rd-sent${tt.sid === g[0].sid ? " is-on" : ""}`} data-sent={g[0].sid} data-testid="sent">
+                  {!bare && <button
+                    className={`rd-say ${tt.sid === g[0].sid ? "is-on" : ""}`}
+                    onClick={() => (tt.sid === g[0].sid && !tt.loading ? tts.stop() : playFrom(g[0].sid, tt.auto))}
+                    aria-label="朗读这句"
+                    data-testid="say"
+                  >
+                    {tt.sid === g[0].sid ? <Pause size={10} fill="currentColor" /> : <Play size={10} fill="currentColor" />}
+                  </button>}
+                  {!bare && (() => {
+                    const text = doc.sentences[g[0].sid];
+                    if (normalize(text).split(" ").length < 2) return null;
+                    const on = st.items[normalize(text)]?.kind === "sentence";
+                    return (
+                      <button
+                        className={`rd-keep ${on ? "is-on" : ""}`}
+                        onClick={() => {
+                          const saved = reader.toggleSentence(text, { lesson: lesson.id, title: lesson.title, sid: g[0].sid, sentence: text });
+                          toast(saved ? "已存为句子" : "已移出语料", "ok");
+                        }}
+                        aria-label={on ? "移出语料" : "存这句到语料"}
+                        title={on ? "移出语料" : "存这句"}
+                        data-testid="keep"
+                      >
+                        <Bookmark size={10} fill={on ? "currentColor" : "none"} />
+                      </button>
+                    );
+                  })()}
+                {g.map((t) => {
+                  const ph = phraseAt.get(t.i);
+                  const inSel = !!sel && t.i >= sel.from && t.i <= sel.to;
+                  const fl = (flash === t.sid ? " is-flash" : "") + (tt.sid === t.sid ? " is-say" : "");
+                  if (!isWord(t))
+                    return (
+                      <Fragment key={t.i}>
+                        <span data-sid={t.sid} className={`${ph && t.i > ph.from && t.i < ph.to ? "ph" : ""}${inSel ? " in-sel" : ""}${fl}`}>
+                          {t.text}
+                        </span>
+                      </Fragment>
+                    );
+                  const it = st.items[t.key!];
+                  return (
+                    <Fragment key={t.i}>
+                    <span
+                      data-ti={t.i}
+                      data-sid={t.sid}
+                      data-testid="tok"
+                      className={`w ${statusClass(it)}${ph ? " ph" : ""}${inSel ? " in-sel" : ""}${sel && sel.from === t.i ? " sel-a" : ""}${sel && sel.to === t.i ? " sel-b" : ""}${fl}`}
+                      onPointerDown={(e) => {
+                        if (e.pointerType === "mouse" && e.button === 0 && !e.shiftKey) drag.current = { start: t.i, moved: false };
+                      }}
+                      onPointerEnter={() => {
+                        const d = drag.current;
+                        if (!d || t.i === d.start) return;
+                        d.moved = true;
+                        anchor.current = d.start;
+                        setSel({ from: Math.min(d.start, t.i), to: Math.max(d.start, t.i) });
+                      }}
+                      onClick={(e) => {
+                        if (drag.current?.moved) return;
+                        selectWord(t.i, e.shiftKey);
+                      }}
+                    >
+                      {t.text}
+                    </span>
+                    </Fragment>
+                  );
+                })}
+                {!bare && lesson.yt?.times[g[0].sid] != null && (
+                  <button className="rd-ts" onClick={() => setVideo({ t: lesson.yt!.times[g[0].sid], n: Date.now() })} data-testid="ts" title="跳到视频这里">
+                    {clockOf(lesson.yt.times[g[0].sid])}
+                  </button>
+                )}
+                </span>
+  );
 
   return (
     <div className={`page rd-page rd-lesson ${sel ? "has-sel" : ""}`}>
@@ -374,9 +518,17 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
           课程
         </a>
         <div className="rd-lesson-tools">
-          <button className={`rd-tts-auto ${tt.auto ? "is-on" : ""}`} onClick={toggleAuto} data-testid="tts-auto" aria-pressed={tt.auto}>
+          <div className="rd-seg" role="tablist" aria-label="阅读视图" data-testid="view-toggle">
+            <button role="tab" aria-selected={mode === "sentence"} className={mode === "sentence" ? "is-on" : ""} onClick={() => switchMode("sentence")} data-testid="view-sentence">
+              单句
+            </button>
+            <button role="tab" aria-selected={mode === "page"} className={mode === "page" ? "is-on" : ""} onClick={() => switchMode("page")} data-testid="view-page">
+              整页
+            </button>
+          </div>
+          <button className={`rd-tts-auto ${tt.auto ? "is-on" : ""}`} onClick={toggleAuto} data-testid="tts-auto" aria-pressed={tt.auto} aria-label="连续播放" title="连续播放">
             {tt.auto ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
-            连续播放
+            <span className="rd-tts-auto-label">连续播放</span>
           </button>
           <button
             className="rd-tts-rate"
@@ -454,85 +606,108 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
               </div>
             </div>
           )}
-          <div ref={textRef} className={`rd-text ${tt.sid != null ? "is-reading" : ""}`} style={{ fontSize: size }} data-testid="reader-text">
-            {paras.map((p, pi) => (
-              <p key={pg.from + pi} className={p.cont ? "rd-cont" : undefined}>
-                {bySentence(p.tokens).map((g) => (
-                <span key={g[0].sid} className={`rd-sent${tt.sid === g[0].sid ? " is-on" : ""}`} data-sent={g[0].sid} data-testid="sent">
-                  <button
-                    className={`rd-say ${tt.sid === g[0].sid ? "is-on" : ""}`}
-                    onClick={() => (tt.sid === g[0].sid && !tt.loading ? tts.stop() : playFrom(g[0].sid, tt.auto))}
-                    aria-label="朗读这句"
-                    data-testid="say"
-                  >
-                    {tt.sid === g[0].sid ? <Pause size={10} fill="currentColor" /> : <Play size={10} fill="currentColor" />}
-                  </button>
-                  {(() => {
-                    const text = doc.sentences[g[0].sid];
-                    if (normalize(text).split(" ").length < 2) return null;
+          {mode === "sentence" ? (
+            <div
+              className="rd-sv"
+              data-testid="sentence-view"
+              onTouchStart={(e) => {
+                const t = e.touches[0];
+                swipe.current = e.touches.length === 1 ? { x: t.clientX, y: t.clientY } : null;
+              }}
+              onTouchEnd={(e) => {
+                const a = swipe.current;
+                swipe.current = null;
+                const t = e.changedTouches[0];
+                if (!a || !t) return;
+                const dx = t.clientX - a.x;
+                const dy = t.clientY - a.y;
+                if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.6) goSent(dx < 0 ? 1 : -1);
+              }}
+            >
+              <div className="rd-sv-count" data-testid="sv-count">
+                {cur + 1} / {doc.sentences.length}
+              </div>
+              <div className="rd-sv-bar" aria-hidden>
+                <i style={{ width: `${((cur + 1) / Math.max(1, doc.sentences.length)) * 100}%` }} />
+              </div>
+              <div
+                key={cur}
+                ref={textRef}
+                className={`rd-text rd-sv-text ${tt.sid === cur ? "is-reading" : ""}`}
+                style={{ fontSize: Math.round(size * 1.3) }}
+                data-testid="reader-text"
+              >
+                {renderSent(tokens, true)}
+              </div>
+              {showTr && (
+                <p className="rd-sv-tr" data-testid="sv-tr">
+                  {tr[cur] ?? "翻译中…"}
+                </p>
+              )}
+              <div className="rd-sv-acts">
+                <button
+                  className={`rd-sv-act rd-sv-play ${tt.sid === cur ? "is-on" : ""}`}
+                  onClick={() => (tt.sid === cur && !tt.loading ? tts.stop() : playFrom(cur, tt.auto))}
+                  aria-label="朗读这句"
+                  data-testid="say"
+                >
+                  {tt.sid === cur ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+                </button>
+                {normalize(doc.sentences[cur] ?? "").split(" ").length >= 2 &&
+                  (() => {
+                    const text = doc.sentences[cur];
                     const on = st.items[normalize(text)]?.kind === "sentence";
                     return (
                       <button
-                        className={`rd-keep ${on ? "is-on" : ""}`}
+                        className={`rd-sv-act ${on ? "is-on" : ""}`}
                         onClick={() => {
-                          const saved = reader.toggleSentence(text, { lesson: lesson.id, title: lesson.title, sid: g[0].sid, sentence: text });
+                          const saved = reader.toggleSentence(text, { lesson: lesson.id, title: lesson.title, sid: cur, sentence: text });
                           toast(saved ? "已存为句子" : "已移出语料", "ok");
                         }}
                         aria-label={on ? "移出语料" : "存这句到语料"}
                         title={on ? "移出语料" : "存这句"}
                         data-testid="keep"
                       >
-                        <Bookmark size={10} fill={on ? "currentColor" : "none"} />
+                        <Bookmark size={17} fill={on ? "currentColor" : "none"} />
                       </button>
                     );
                   })()}
-                {g.map((t) => {
-                  const ph = phraseAt.get(t.i);
-                  const inSel = !!sel && t.i >= sel.from && t.i <= sel.to;
-                  const fl = (flash === t.sid ? " is-flash" : "") + (tt.sid === t.sid ? " is-say" : "");
-                  if (!isWord(t))
-                    return (
-                      <Fragment key={t.i}>
-                        <span data-sid={t.sid} className={`${ph && t.i > ph.from && t.i < ph.to ? "ph" : ""}${inSel ? " in-sel" : ""}${fl}`}>
-                          {t.text}
-                        </span>
-                      </Fragment>
-                    );
-                  const it = st.items[t.key!];
-                  return (
-                    <Fragment key={t.i}>
-                    <span
-                      data-ti={t.i}
-                      data-sid={t.sid}
-                      data-testid="tok"
-                      className={`w ${statusClass(it)}${ph ? " ph" : ""}${inSel ? " in-sel" : ""}${sel && sel.from === t.i ? " sel-a" : ""}${sel && sel.to === t.i ? " sel-b" : ""}${fl}`}
-                      onPointerDown={(e) => {
-                        if (e.pointerType === "mouse" && e.button === 0 && !e.shiftKey) drag.current = { start: t.i, moved: false };
-                      }}
-                      onPointerEnter={() => {
-                        const d = drag.current;
-                        if (!d || t.i === d.start) return;
-                        d.moved = true;
-                        anchor.current = d.start;
-                        setSel({ from: Math.min(d.start, t.i), to: Math.max(d.start, t.i) });
-                      }}
-                      onClick={(e) => {
-                        if (drag.current?.moved) return;
-                        selectWord(t.i, e.shiftKey);
-                      }}
-                    >
-                      {t.text}
-                    </span>
-                    </Fragment>
-                  );
-                })}
-                {lesson.yt?.times[g[0].sid] != null && (
-                  <button className="rd-ts" onClick={() => setVideo({ t: lesson.yt!.times[g[0].sid], n: Date.now() })} data-testid="ts" title="跳到视频这里">
-                    {clockOf(lesson.yt.times[g[0].sid])}
+                {lesson.yt?.times[cur] != null && (
+                  <button className="rd-sv-act rd-sv-ts" onClick={() => setVideo({ t: lesson.yt!.times[cur], n: Date.now() })} data-testid="ts" title="跳到视频这里">
+                    <Youtube size={16} /> {clockOf(lesson.yt.times[cur])}
                   </button>
                 )}
-                </span>
-                ))}
+                <button className={`rd-sv-act rd-sv-trbtn ${showTr ? "is-on" : ""}`} onClick={() => setShowTr((x) => !x)} aria-pressed={showTr} data-testid="sv-tr-toggle">
+                  <Languages size={16} /> {showTr ? "隐藏翻译" : "显示翻译"}
+                </button>
+              </div>
+              <footer className="rd-sv-nav">
+                <button className="rd-sv-step" onClick={() => goSent(-1)} disabled={cur === 0} aria-label="上一句" data-testid="sv-prev">
+                  <ChevronLeft size={22} />
+                </button>
+                <button
+                  className="rd-sv-step is-next"
+                  onClick={() => (cur < doc.sentences.length - 1 ? goSent(1) : lessonDone())}
+                  aria-label={cur < doc.sentences.length - 1 ? "下一句" : "读完课程"}
+                  data-testid="sv-next"
+                >
+                  {cur < doc.sentences.length - 1 ? <ChevronRight size={22} /> : <Check size={20} />}
+                </button>
+              </footer>
+              <p className="rd-keys hide-touch">
+                <kbd>←</kbd>
+                <kbd>→</kbd> 切句 · <kbd>↑</kbd>
+                <kbd>↓</kbd> 切词 · <kbd>b</kbd> 下个蓝词 · <kbd>1</kbd>–<kbd>4</kbd> 等级 · <kbd>k</kbd> 已知 · <kbd>x</kbd> 忽略 · <kbd>h</kbd> 写释义 · <kbd>s</kbd> 发音 · <kbd>m</kbd> Musk ·{" "}
+                <kbd>⇧</kbd>+拖动/点击 选短语 · <kbd>t</kbd> 翻译 · <kbd>p</kbd> 连续播放
+              </p>
+              <p className="rd-keys show-touch">左右滑动切句</p>
+            </div>
+          ) : (
+          <>
+          <div ref={textRef} className={`rd-text ${tt.sid != null ? "is-reading" : ""}`} style={{ fontSize: size }} data-testid="reader-text">
+            {paras.map((p, pi) => (
+              <p key={pg.from + pi} className={p.cont ? "rd-cont" : undefined}>
+                {bySentence(p.tokens).map((g) => renderSent(g))}
               </p>
             ))}
           </div>
@@ -560,6 +735,8 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
             <kbd>←</kbd>
             <kbd>→</kbd> 翻页 · <kbd>p</kbd> 连续播放
           </p>
+          </>
+          )}
           {tt.sid != null && (
             <div className="rd-np" data-testid="now-playing">
               <button className="rd-icon" onClick={() => tts.stop()} aria-label="停止">
