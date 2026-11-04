@@ -1,7 +1,9 @@
-import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, ExternalLink, Plus, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, ExternalLink, Pause, Play, Plus, Trash2 } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { go } from "../lib/router";
 import { speak } from "../reader/dict";
+import { muskLookup } from "../reader/MuskSays";
+import { prefetch, RATES, tts, useTts } from "../reader/tts";
 import { StatusPicker, WordCard, type Sel } from "../reader/WordCard";
 export { StatusPicker };
 import { lessonStats, normalize, parse, phraseIndex, reader, useReader, type Context, type Item, type Lesson, type Status, type Token } from "../reader/model";
@@ -160,6 +162,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   const drag = useRef<{ start: number; moved: boolean } | null>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const best = useRef("");
+  const tt = useTts();
 
   const pg = doc.pages[page] ?? { from: 0, to: 0, words: 0 };
   const paras = doc.paragraphs.slice(pg.from, pg.to);
@@ -265,6 +268,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
       else if (k === "ArrowRight") nav(1);
       else if (k === "ArrowLeft") nav(-1);
       else if (k === "b") nav(1, true);
+      else if (k === "p") toggleAuto();
       else if (k === "+" || k === "=") setSize((x) => Math.min(30, x + 1));
       else if (k === "-") setSize((x) => Math.max(15, x - 1));
       else if (!sel) hit = false;
@@ -292,6 +296,55 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
 
   const blueCount = blueOnPage().length;
 
+  // ---- sentence TTS (xAI stock voice via Worker; browser speech fallback) ----
+  const sidPage = useMemo(() => {
+    const m = new Map<number, number>();
+    doc.pages.forEach((pg2, pi) => doc.paragraphs.slice(pg2.from, pg2.to).forEach((p) => p.tokens.forEach((t) => !m.has(t.sid) && m.set(t.sid, pi))));
+    return m;
+  }, [doc]);
+  const playFrom = async (sid: number, auto: boolean) => {
+    tts.setAuto(auto);
+    for (let s = sid; s < doc.sentences.length; s++) {
+      const pi = sidPage.get(s);
+      if (pi != null && pi !== page) setPage(pi);
+      requestAnimationFrame(() => document.querySelector(`[data-sid="${s}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+      if (auto && s + 1 < doc.sentences.length) prefetch(doc.sentences[s + 1]).catch(() => null);
+      const done = await tts.play(s, doc.sentences[s]);
+      if (!done || !auto) return done && tts.stop();
+    }
+    tts.stop();
+  };
+  useEffect(() => () => tts.stop(), []);
+  const firstSid = tokens[0]?.sid ?? 0;
+  const toggleAuto = () => (tt.auto ? tts.stop() : playFrom(sel ? all[sel.from].sid : tt.sid ?? firstSid, true));
+
+  // Learning words / phrases in the sentence being read that Musk has verified clips for.
+  const [muskChips, setMuskChips] = useState<{ key: string; from: number; to: number }[]>([]);
+  useEffect(() => {
+    setMuskChips((c) => (c.length ? [] : c));
+    if (tt.sid == null) return;
+    const cands = new Map<string, { key: string; from: number; to: number }>();
+    for (const t of tokens) {
+      if (t.sid !== tt.sid) continue;
+      const ph = phraseAt.get(t.i);
+      if (ph && ph.from === t.i) {
+        const it = st.items[ph.key];
+        if (it && it.status >= 1 && it.status <= 4) cands.set(ph.key, ph);
+      }
+      if (!isWord(t)) continue;
+      const it = st.items[t.key!];
+      if (it && it.status >= 1 && it.status <= 4 && !cands.has(t.key!)) cands.set(t.key!, { key: t.key!, from: t.i, to: t.i });
+    }
+    let live = true;
+    const list = [...cands.values()].sort((a, b) => b.key.length - a.key.length).slice(0, 4);
+    Promise.all(list.map((c) => muskLookup(c.key, 1).then((r) => (r.musk > 0 && r.hits.length ? c : null), () => null))).then(
+      (r) => live && setMuskChips(r.filter((x): x is { key: string; from: number; to: number } => !!x).slice(0, 2)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [tt.sid, page, st.items]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className={`page rd-page rd-lesson ${sel ? "has-sel" : ""}`}>
       <header className="rd-lesson-head">
@@ -300,6 +353,19 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
           课程
         </a>
         <div className="rd-lesson-tools">
+          <button className={`rd-tts-auto ${tt.auto ? "is-on" : ""}`} onClick={toggleAuto} data-testid="tts-auto" aria-pressed={tt.auto}>
+            {tt.auto ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
+            连续播放
+          </button>
+          <button
+            className="rd-tts-rate"
+            onClick={() => tts.setRate(RATES[(RATES.indexOf(tt.rate) + 1) % RATES.length] ?? 1)}
+            aria-label="语速"
+            title="语速"
+            data-testid="tts-rate"
+          >
+            {tt.rate}×
+          </button>
           <button className="rd-icon" onClick={() => setSize((x) => Math.max(15, x - 1))} aria-label="缩小字号">
             A<small>-</small>
           </button>
@@ -332,20 +398,36 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
           <div ref={textRef} className="rd-text" style={{ fontSize: size }} data-testid="reader-text">
             {paras.map((p, pi) => (
               <p key={pg.from + pi}>
-                {p.tokens.map((t) => {
+                {p.tokens.map((t, ti) => {
                   const ph = phraseAt.get(t.i);
                   const inSel = !!sel && t.i >= sel.from && t.i <= sel.to;
-                  const fl = flash === t.sid ? " is-flash" : "";
+                  const fl = (flash === t.sid ? " is-flash" : "") + (tt.sid === t.sid ? " is-say" : "");
+                  const say =
+                    ti === 0 || p.tokens[ti - 1].sid !== t.sid ? (
+                      <button
+                        key={`say${t.sid}`}
+                        className={`rd-say ${tt.sid === t.sid ? "is-on" : ""}`}
+                        onClick={() => (tt.sid === t.sid && !tt.loading ? tts.stop() : playFrom(t.sid, tt.auto))}
+                        aria-label="朗读这句"
+                        data-testid="say"
+                      >
+                        {tt.sid === t.sid ? <Pause size={10} fill="currentColor" /> : <Play size={10} fill="currentColor" />}
+                      </button>
+                    ) : null;
                   if (!isWord(t))
                     return (
-                      <span key={t.i} data-sid={t.sid} className={`${ph && t.i > ph.from && t.i < ph.to ? "ph" : ""}${inSel ? " in-sel" : ""}${fl}`}>
-                        {t.text}
-                      </span>
+                      <Fragment key={t.i}>
+                        {say}
+                        <span data-sid={t.sid} className={`${ph && t.i > ph.from && t.i < ph.to ? "ph" : ""}${inSel ? " in-sel" : ""}${fl}`}>
+                          {t.text}
+                        </span>
+                      </Fragment>
                     );
                   const it = st.items[t.key!];
                   return (
+                    <Fragment key={t.i}>
+                    {say}
                     <span
-                      key={t.i}
                       data-ti={t.i}
                       data-sid={t.sid}
                       data-testid="tok"
@@ -367,6 +449,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
                     >
                       {t.text}
                     </span>
+                    </Fragment>
                   );
                 })}
               </p>
@@ -394,8 +477,33 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
             <kbd>→</kbd> 切词 · <kbd>b</kbd> 下个蓝词 · <kbd>1</kbd>–<kbd>4</kbd> 等级 · <kbd>k</kbd> 已知 · <kbd>x</kbd> 忽略 · <kbd>h</kbd> 写释义 · <kbd>s</kbd> 发音 · <kbd>m</kbd>{" "}
             Musk · <kbd>⇧</kbd>+拖动/点击 选短语 · <kbd>⇧</kbd>
             <kbd>←</kbd>
-            <kbd>→</kbd> 翻页
+            <kbd>→</kbd> 翻页 · <kbd>p</kbd> 连续播放
           </p>
+          {tt.sid != null && (
+            <div className="rd-np" data-testid="now-playing">
+              <button className="rd-icon" onClick={() => tts.stop()} aria-label="停止">
+                <Pause size={15} fill="currentColor" />
+              </button>
+              <span className="rd-np-meta">
+                第 {tt.sid + 1}/{doc.sentences.length} 句{tt.loading ? " · 加载中…" : tt.src === "browser" ? " · 系统语音" : ""}
+              </span>
+              {muskChips.map((c) => (
+                <button
+                  key={c.key}
+                  className="rd-np-musk"
+                  data-testid="np-musk"
+                  onClick={() => {
+                    tts.stop();
+                    anchor.current = c.from;
+                    setSel({ from: c.from, to: c.to });
+                    setAutoMusk(Date.now());
+                  }}
+                >
+                  听 Musk 原声 · {c.key}
+                </button>
+              ))}
+            </div>
+          )}
         </article>
 
         <aside className={`rd-aside ${sel ? "is-open" : ""}`} aria-label="词卡">

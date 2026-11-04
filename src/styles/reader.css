@@ -328,7 +328,8 @@
 }
 .rd-lesson-tools {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
 }
 .rd-grid {
   display: grid;
@@ -986,4 +987,76 @@
     width: 380px;
     max-height: min(78dvh, 720px);
   }
+}
+
+/* ---------- sentence TTS ---------- */
+.rd-say {
+  display: inline-grid;
+  place-items: center;
+  width: 1.05em;
+  height: 1.05em;
+  margin: 0 0.28em 0 0.05em;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  vertical-align: 0.06em;
+  font-size: 0.82em;
+  color: var(--rd-blue-ink);
+  background: color-mix(in oklab, var(--rd-blue-ink) 10%, transparent);
+  opacity: 0.45;
+  cursor: pointer;
+  transition: opacity 0.2s, background 0.2s;
+}
+.rd-say svg { width: 0.5em; height: 0.5em; }
+.rd-text p:hover .rd-say, .rd-say.is-on { opacity: 1; }
+.rd-say.is-on { color: #fff; background: var(--rd-blue-ink); }
+@media (hover: none) { .rd-say { opacity: 0.7; } }
+.rd-text .is-say { background-image: linear-gradient(color-mix(in oklab, var(--rd-blue-ink) 9%, transparent), color-mix(in oklab, var(--rd-blue-ink) 9%, transparent)); }
+.rd-text .w.is-say { box-shadow: 0 2px 0 -1px color-mix(in oklab, var(--rd-blue-ink) 35%, transparent); }
+.rd-tts-auto,
+.rd-tts-rate {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 16px;
+  font: 600 13px/1 var(--rd-font);
+  color: var(--ink);
+  background: var(--rd-fill-2);
+  cursor: pointer;
+}
+.rd-tts-rate { min-width: 46px; justify-content: center; font-variant-numeric: tabular-nums; }
+.rd-tts-auto.is-on { color: #fff; background: var(--rd-blue-ink); }
+.rd-np {
+  position: sticky;
+  bottom: calc(var(--tab, 0px) + 12px);
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 8px 12px 8px 8px;
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--card) 88%, transparent);
+  backdrop-filter: saturate(1.8) blur(24px);
+  -webkit-backdrop-filter: saturate(1.8) blur(24px);
+  box-shadow: 0 0 0 0.5px var(--rd-hair), 0 12px 30px -14px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+}
+.rd-np-meta { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.rd-np-musk {
+  height: 28px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 14px;
+  font: 600 12px/1 var(--rd-font);
+  color: var(--terra, #d4572a);
+  background: color-mix(in oklab, var(--terra, #d4572a) 13%, transparent);
+  cursor: pointer;
+}
+@media (max-width: 600px) {
+  .rd-tts-auto { padding: 0 10px; }
 }

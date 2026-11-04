@@ -1,0 +1,16 @@
+name = "musk-atlas-tts"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+account_id = "be75f707c7a89362cba8a01e5538b7f8"
+workers_dev = true
+
+[vars]
+VOICE = "rex"
+# Max new characters synthesized per UTC day (cost cap: 200k chars ≈ $3 at $15 / 1M chars).
+DAILY_CHARS = "200000"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "musk-atlas-clips"
+
+# Secret (not in this file): XAI_API_KEY  — `wrangler secret put XAI_API_KEY`
