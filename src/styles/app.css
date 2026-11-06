@@ -1346,12 +1346,20 @@ code {
 .palette-input input::placeholder {
   color: var(--ink-4);
 }
+.palette-body {
+  max-height: min(70dvh, 640px);
+  overflow-y: auto;
+}
+.palette-section {
+  margin: 14px 18px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
 .palette-list {
   list-style: none;
   margin: 0;
   padding: 8px;
-  max-height: min(60vh, 520px);
-  overflow-y: auto;
 }
 .palette-list li[role="option"] {
   display: grid;
@@ -1393,6 +1401,169 @@ code {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+}
+
+/* Quick lookup card inside the same palette. */
+.ql-card {
+  margin: 10px 10px 0;
+  padding: 14px 14px 12px;
+  border-radius: 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+.ql-kicker,
+.ql-src,
+.ql-note,
+.ql-musk,
+.ql-dict,
+.ql-mt {
+  margin: 8px 0 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.ql-kicker {
+  margin-top: 0;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.ql-word {
+  margin: 2px 0 0;
+  font: 600 clamp(22px, 5vw, 28px) / 1.15 var(--serif);
+  letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
+}
+.ql-ipa {
+  margin: 2px 0 0;
+  color: var(--ink-3);
+  font: italic 500 14px/1.4 var(--serif);
+}
+.ql-usage {
+  margin: 8px 0 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.ql-ex {
+  display: grid;
+  gap: 2px;
+  margin-top: 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line-strong);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.ql-ex span:last-child {
+  color: var(--ink-3);
+}
+.ql-senses {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.ql-senses li {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.ql-senses em {
+  flex: none;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.ql-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.ql-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.ql-btn.is-primary {
+  background: var(--ink);
+  color: var(--paper);
+}
+.ql-btn:disabled {
+  opacity: 0.4;
+}
+.ql-alts {
+  margin-top: 10px;
+}
+.ql-alts summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ql-alts ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ql-alt {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.ql-alt div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.ql-alt b {
+  font-weight: 600;
+}
+.ql-alt span {
+  color: var(--ink-3);
+}
+.ql-ctx {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--ink) 4%, transparent);
+}
+.ql-ctx span {
+  flex: none;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.ql-ctx input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  font-size: 14px;
+}
+.ql-status {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.ql-musk a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* ---------- toasts ---------- */
