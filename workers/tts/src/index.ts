@@ -1,6 +1,9 @@
+import { handleExpress } from "./express";
+
 /**
  * musk-atlas-tts — tiny proxy for xAI text-to-speech (stock preset voice only; no cloning).
  * POST { text } -> audio/mpeg. Audio is cached in R2 at tts/<sha256>.mp3 so repeats are free.
+ * POST /express { q, context? } -> one English expression for a Chinese paraphrase (same XAI_API_KEY, separate budget).
  * GET /captions?v=<videoId> -> { v, title, lang, kind, segs:[[ms, durMs, text]] } — public YouTube captions
  * (manual English first, then auto), no cookies or accounts. Cached in R2 at yt/<id>.json.
  */
@@ -9,9 +12,19 @@ interface Env {
   XAI_API_KEY: string;
   VOICE: string;
   DAILY_CHARS: string;
+  /** Chat model for POST /express. Defaults in code when unset. */
+  XAI_CHAT_MODEL?: string;
+  /** New expression-model calls per UTC day. Cache hits are free. */
+  EXPRESS_DAILY?: string;
 }
 
-const ORIGINS = new Set(["https://yuanzhevc-stack.github.io", "http://localhost:5189"]);
+const ORIGINS = new Set([
+  "https://yuanzhevc-stack.github.io",
+  "http://localhost:5188",
+  "http://127.0.0.1:5188",
+  "http://localhost:5189",
+  "http://127.0.0.1:5189",
+]);
 const MAX_CHARS = 600;
 
 const cors = (origin: string) => ({
@@ -36,6 +49,10 @@ export default {
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: h });
     const url = new URL(req.url);
     if (url.pathname === "/captions" && req.method === "GET") return captions(url, env, h);
+    if (url.pathname === "/express") {
+      if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: h });
+      return handleExpress(req, env, h);
+    }
     if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: h });
 
     let text = "";

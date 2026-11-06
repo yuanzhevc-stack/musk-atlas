@@ -1,6 +1,7 @@
 /** Meanings for the reader (LingQ-style suggested meanings):
  *  1. ECDICT (MIT), bundled offline as sharded JSON in public/dict/ (works in mainland China, never rate-limited);
  *     inflections resolve via exchange/lemma data ("looks" -> "look").
+ *     No matching headword is an empty list. A failed manifest or shard fetch throws, so "not in the dictionary" stays distinct from "the dictionary did not load".
  *  2. Word Atlas lexicon (Chinese gloss) when the word is in it.
  *  3. Machine translation (MyMemory, then Google gtx) when the dictionary has no hit, and for phrases.
  *  4. English definitions from dictionaryapi.dev when available.
@@ -37,12 +38,16 @@ interface Shard {
   w: Record<string, Row>;
   l: Record<string, string>;
 }
-const ROOT = `${import.meta.env.BASE_URL}dict/`;
+function dictRoot() {
+  const base = (import.meta.env && import.meta.env.BASE_URL) || "/";
+  const b = String(base);
+  return `${b.endsWith("/") ? b : `${b}/`}dict/`;
+}
 let manifest: Promise<{ version: number; shards: string[] }> | null = null;
 let shardSet: Set<string> | null = null;
-const shards = new Map<string, Promise<Shard | null>>();
+const shards = new Map<string, Promise<Shard>>();
 const loadManifest = () =>
-  (manifest ??= fetch(`${ROOT}manifest.json`)
+  (manifest ??= fetch(`${dictRoot()}manifest.json`)
     .then((r) => {
       if (!r.ok) throw new Error(String(r.status));
       return r.json();
@@ -64,12 +69,13 @@ async function shardOf(k: string): Promise<Shard | null> {
     if (!shards.has(p))
       shards.set(
         p,
-        fetch(`${ROOT}${p}.json?v=${m.version}`)
-          .then((r) => (r.ok ? (r.json() as Promise<Shard>) : null))
-          .catch(() => {
-            shards.delete(p);
-            return null;
-          }),
+        fetch(`${dictRoot()}${p}.json?v=${m.version}`).then((r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          return r.json() as Promise<Shard>;
+        }).catch((e) => {
+          shards.delete(p);
+          throw e;
+        }),
       );
     return shards.get(p)!;
   }
@@ -150,6 +156,14 @@ async function timed(url: string, ms = 5000) {
   }
 }
 const inflight = new Map<string, Promise<unknown>>();
+/** Clears in-memory dictionary caches. Used by tests. */
+export function resetDictForTests() {
+  manifest = null;
+  shardSet = null;
+  shards.clear();
+  for (const k of Object.keys(mem)) delete mem[k];
+  inflight.clear();
+}
 function cached<T>(id: string, run: () => Promise<T | null>): Promise<T | null> {
   if (id in mem) return Promise.resolve(mem[id] as T);
   if (!inflight.has(id))
@@ -182,6 +196,33 @@ export function translate(text: string) {
       const j = (await r.json()) as [[string, string][]];
       const t = j?.[0]?.map((x) => x[0]).join("").trim();
       if (t) return t;
+      throw new Error("gtx");
+    };
+    return new Promise<string | null>((res) => {
+      let left = 2;
+      const fail = () => --left === 0 && res(null);
+      mymemory().then(res, fail);
+      gtx().then(res, fail);
+    });
+  });
+}
+
+/** Literal zh -> en machine translation. Callers must label it as 机器直译 and never as idiomatic advice. */
+export function translateToEn(text: string) {
+  return cached<string>(`mt:zh:${text}`, async () => {
+    const q = encodeURIComponent(text.slice(0, 200));
+    const mymemory = async () => {
+      const r = await timed(`https://api.mymemory.translated.net/get?q=${q}&langpair=zh-CN|en`, 8000);
+      const j = (await r.json()) as { responseStatus?: number; responseData?: { translatedText?: string } };
+      const t = j.responseData?.translatedText?.trim();
+      if (t && j.responseStatus === 200 && !/MYMEMORY WARNING|QUERY LENGTH/i.test(t) && /[A-Za-z]/.test(t)) return t;
+      throw new Error("mymemory");
+    };
+    const gtx = async () => {
+      const r = await timed(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=zh-CN&tl=en&dt=t&q=${q}`, 8000);
+      const j = (await r.json()) as [[string, string][]];
+      const t = j?.[0]?.map((x) => x[0]).join("").trim();
+      if (t && /[A-Za-z]/.test(t)) return t;
       throw new Error("gtx");
     };
     return new Promise<string | null>((res) => {

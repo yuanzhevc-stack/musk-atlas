@@ -145,7 +145,7 @@ function Shell({ privateAvailable }: { privateAvailable: boolean }) {
             ))}
           </nav>
           <div className="topbar-tools">
-            <button className="search-pill" onClick={() => setPalette(true)} aria-label="搜索单词">
+            <button className="search-pill" onClick={() => setPalette(true)} aria-label="查词或中文说法">
               <Search size={17} />
               <span>词库</span>
               <kbd>⌘K</kbd>
