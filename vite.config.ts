@@ -90,6 +90,18 @@ export default defineConfig({
   plugins: [
     react(),
     {
+      name: "build-version",
+      apply: "build",
+      closeBundle() {
+        const outDir = path.resolve("dist");
+        const htmlPath = path.join(outDir, "index.html");
+        if (!fs.existsSync(htmlPath)) return;
+        const html = fs.readFileSync(htmlPath, "utf8");
+        const js = html.match(/src="([^"]+\.js)"/)?.[1] ?? "";
+        fs.writeFileSync(path.join(outDir, "version.json"), JSON.stringify({ js }));
+      },
+    },
+    {
       name: "private-local-library",
       configureServer(server) {
         server.middlewares.use(localMedia);
