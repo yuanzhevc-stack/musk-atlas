@@ -71,6 +71,27 @@ export function sourcePlan(ctx: PlanCtx, lesson: { id: string; yt?: { v: string;
 /** Only a voiceprint label of "musk" is a confirmed Musk line. */
 export const isConfirmedMusk = (m: string | null | undefined) => m === "musk";
 
+/**
+ * Scroll offset that places a row near the vertical center of a transcript pane.
+ * Coordinates are inside the scrolling content, not the page.
+ */
+export function centerScroll(viewHeight: number, contentHeight: number, itemTop: number, itemHeight: number): number {
+  if (!(viewHeight > 0) || contentHeight <= viewHeight) return 0;
+  const raw = itemTop - (viewHeight - Math.min(itemHeight, viewHeight)) / 2;
+  const max = Math.max(0, contentHeight - viewHeight);
+  return Math.max(0, Math.min(max, raw));
+}
+
+/** True when the pane should move. A line already near the center stays put. */
+export function shouldRecenter(current: number, target: number, slack = 28): boolean {
+  return Math.abs(current - target) > slack;
+}
+
+/** Playback may move the transcript. A drag, an open word card, or a recent manual scroll holds it. */
+export function followAllowed(opts: { picking: boolean; cardOpen: boolean; userHold: boolean }): boolean {
+  return !opts.picking && !opts.cardOpen && !opts.userHold;
+}
+
 /** Last word whose start is <= t, or -1 before the first word. */
 export function wordAt(starts: number[], t: number): number {
   if (!starts.length || !Number.isFinite(t)) return -1;
