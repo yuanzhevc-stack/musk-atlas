@@ -9,6 +9,7 @@ export interface PlayerHandle {
   play: () => void;
   pause: () => void;
   toggle: () => void;
+  getTime: () => number;
 }
 
 interface YTPlayer {
@@ -120,6 +121,15 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
       const state = player.current?.getPlayerState?.();
       if (state === PLAYING || state === BUFFERING) player.current?.pauseVideo();
       else player.current?.playVideo();
+    },
+    getTime() {
+      try {
+        const t = player.current?.getCurrentTime?.();
+        if (typeof t === "number" && Number.isFinite(t)) return t;
+      } catch {
+        /* destroyed */
+      }
+      return initialRef.current;
     },
   }));
 
