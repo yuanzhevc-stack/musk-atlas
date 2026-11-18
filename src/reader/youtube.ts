@@ -35,14 +35,21 @@ const ERR: Record<string, string> = {
   no_english: "这个视频没有英文字幕",
   timedtext_blocked: "YouTube 暂时拒绝了字幕请求，稍后再试",
   empty_captions: "字幕是空的",
+  captions_blocked: "YouTube 暂时拦下了字幕请求（登录或机器人检查），稍后再试",
+  unavailable: "这个视频不存在或已无法观看",
+  age_restricted: "这个视频有年龄限制，公开字幕拿不到",
 };
+
+export function captionErrorMessage(code: string | undefined, status: number): string {
+  return ERR[code ?? ""] ?? `字幕获取失败（${status}）`;
+}
 
 export async function fetchCaptions(v: string): Promise<Captions> {
   const r = await fetch(`${TTS_URL}/captions?v=${v}`).catch(() => null);
   if (!r) throw new Error("网络不通，稍后再试");
   if (!r.ok) {
     const j = (await r.json().catch(() => ({}))) as { error?: string };
-    throw new Error(ERR[j.error ?? ""] ?? `字幕获取失败（${r.status}）`);
+    throw new Error(captionErrorMessage(j.error, r.status));
   }
   return (await r.json()) as Captions;
 }
