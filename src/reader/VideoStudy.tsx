@@ -488,7 +488,7 @@ export function VideoStudy({
           </button>
         </div>
         {source === "online" ? (
-          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} />
+          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} onUseLocal={() => switchSource("local")} />
         ) : local.status === "ready" ? (
           <LocalPlayer key={`${local.file.name}:${local.file.size}`} ref={player} file={local.file} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} />
         ) : (

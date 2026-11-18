@@ -1540,7 +1540,8 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
   line-height: 1.45;
 }
 .vs-overlay p { margin: 0; max-width: 28em; }
-.vs-overlay-quiet { pointer-events: none; background: color-mix(in oklab, #10241c 55%, transparent); }
+.vs-overlay-quiet { background: color-mix(in oklab, #10241c 78%, transparent); }
+.vs-overlay-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .vs-overlay button,
 .vs-overlay a,
 .musk-noclip a {
