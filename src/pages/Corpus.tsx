@@ -1,6 +1,6 @@
 import { Check, CornerUpLeft, Download, GraduationCap, MoreHorizontal, PenLine, Search, Trash2, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CorpusPlay } from "../reader/CorpusPlay";
+import { CorpusPlay, SourcePlayer } from "../reader/CorpusPlay";
 import { clock } from "../musk/corpus";
 import { useVocab } from "../musk/vocab";
 import { normalize, reader, useReader, type Item } from "../reader/model";
@@ -250,7 +250,11 @@ export function CorpusRow({ it, open, onToggle, replay = 0 }: { it: Item; open: 
   const at = s.toLowerCase().indexOf(it.text.toLowerCase());
   const [menu, setMenu] = useState<"status" | "more" | null>(null);
   const [editing, setEditing] = useState(false);
+  const [shown, setShown] = useState(false);
   const close = useCallback(() => setMenu(null), []);
+  useEffect(() => {
+    if (!open) setShown(false);
+  }, [open]);
   return (
     <li className={`rd-row ${open ? "is-open" : ""}`} data-testid="corpus-row" data-key={it.key}>
       <div className="rd-row-main cp-main">
@@ -291,7 +295,6 @@ export function CorpusRow({ it, open, onToggle, replay = 0 }: { it: Item; open: 
             {it.text}
             {it.kind !== "word" && <em>{KIND_LABEL[it.kind]}</em>}
           </b>
-          <span className="rd-row-meaning">{it.meaning || <i className="rd-dim">无释义</i>}</span>
           {s && it.kind !== "sentence" && !open && (
             <span className="rd-row-ctx">
               {at >= 0 ? (
@@ -350,6 +353,15 @@ export function CorpusRow({ it, open, onToggle, replay = 0 }: { it: Item; open: 
       {open && (
         <div className="rd-row-detail cp-detail">
           <CorpusPlay it={it} replay={replay} />
+          {!shown ? (
+            <button type="button" className="rd-btn" onClick={() => setShown(true)} data-testid="row-reveal">
+              显示释义
+            </button>
+          ) : (
+            <p className="rd-review-meaning" data-testid="row-meaning">
+              {it.meaning || "（没有释义）"}
+            </p>
+          )}
         </div>
       )}
       <Sheet open={editing} onClose={() => setEditing(false)} label="编辑释义和笔记" className="rd-sheet">
@@ -376,12 +388,17 @@ export function CorpusRow({ it, open, onToggle, replay = 0 }: { it: Item; open: 
 export function ReviewSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const st = useReader();
   const [shown, setShown] = useState(false);
+  const [clip, setClip] = useState(0);
   const due = Object.values(st.items)
     .filter((it) => it.srs && it.srs.due <= Date.now())
     .sort((a, b) => a.srs!.due - b.srs!.due);
   const it = due[0];
   const fresh = it?.srs && it.srs.reps === 0 && it.srs.s === 0;
   const pv = it ? preview(fresh ? undefined : it.srs, Date.now()) : null;
+  useEffect(() => {
+    setShown(false);
+    setClip(Date.now());
+  }, [it?.key]);
   const grade = (g: Grade) => {
     reader.grade(it.key, g);
     setShown(false);
@@ -399,7 +416,10 @@ export function ReviewSheet({ open, onClose }: { open: boolean; onClose: () => v
         <div className="rd-review">
           <p className="rd-dim">还剩 {due.length}</p>
           <h2>{it.text}</h2>
-          {it.ctx && <blockquote>{it.ctx.sentence}</blockquote>}
+          <SourcePlayer key={it.key} it={it} nonce={clip || 1} />
+          <button type="button" className="rd-btn" onClick={() => setClip(Date.now())} data-testid="review-replay">
+            重播原片
+          </button>
           {!shown ? (
             <button className="rd-btn rd-btn-primary" onClick={() => setShown(true)}>
               显示释义
@@ -407,7 +427,7 @@ export function ReviewSheet({ open, onClose }: { open: boolean; onClose: () => v
           ) : (
             <>
               <p className="rd-review-meaning">{it.meaning || "（没有释义）"}</p>
-              <MuskSays q={it.key} compact />
+              {it.kind !== "sentence" && <MuskSays q={it.key} compact />}
               <div className="rd-grades">
                 {([
                   [Rating.Again, "忘了"],

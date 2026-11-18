@@ -7,6 +7,8 @@ import { prefetch, RATES, tts, useTts } from "../reader/tts";
 import { StatusPicker, WordCard, type Sel } from "../reader/WordCard";
 export { StatusPicker };
 import { lessonStats, normalize, parse, phraseIndex, reader, useReader, type Context, type Item, type Lesson, type Status, type Token } from "../reader/model";
+import { lessonMedia } from "../reader/sync";
+import { VideoStudy } from "../reader/VideoStudy";
 import { gsel } from "../reader/select";
 import { captionsToLesson, clockOf, fetchCaptions, watchUrl, youtubeId } from "../reader/youtube";
 import { Sheet } from "../ui/Sheet";
@@ -55,6 +57,7 @@ function Library({ missing }: { missing: boolean }) {
             <a key={ls.id} href={`#/reader?l=${ls.id}`} className="rd-card" data-testid="lesson-card">
               <b>{ls.title}</b>
               <span className="rd-card-meta">
+                {ls.yt ? "视频 · " : ""}
                 {k.unique} 词 · <i className="dot dot-blue" />
                 {k.blue} · <i className="dot dot-yellow" />
                 {k.learning}
@@ -153,7 +156,7 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
         </label>
         {err && <p className="rd-err" data-testid="import-err">{err}</p>}
         <button className="rd-btn rd-btn-primary" disabled={!ok} onClick={() => void submit()} data-testid="import-save">
-          {busy ? "读取字幕…" : vid ? "导入字幕并阅读" : "开始阅读"}
+          {busy ? "读取字幕…" : vid ? "导入字幕并学习" : "开始阅读"}
         </button>
       </div>
     </Sheet>
@@ -164,6 +167,7 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
 
 const isWord = (t: Token) => !!t.key;
 const VIEW_KEY = "musk-atlas:reader:view";
+const STUDY_KEY = "musk-atlas:reader:study";
 const TR_KEY = "musk-atlas:reader:tr";
 const statusClass = (it?: Item) => (!it ? "s-new" : it.status === 5 ? "s-known" : it.status === -1 ? "s-ign" : `s-${it.status}`);
 
@@ -182,6 +186,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   const [autoMusk, setAutoMusk] = useState(0);
   const [video, setVideo] = useState<{ t: number; n: number } | null>(null);
   const [mode, setModeRaw] = useState<"sentence" | "page">(() => (localStorage.getItem(VIEW_KEY) === "page" ? "page" : "sentence"));
+  const [study, setStudy] = useState<"video" | "read">(() => (!lesson.yt || localStorage.getItem(STUDY_KEY) === "read" ? "read" : "video"));
   const [cur, setCur] = useState(() => {
     const n = doc.sentences.length;
     const want = focusSid ?? lesson.sid ?? doc.paragraphs[doc.pages[Math.max(0, startPage)]?.from ?? 0]?.tokens[0]?.sid ?? 0;
@@ -242,9 +247,11 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
 
   const selText = sel ? all.slice(sel.from, sel.to + 1).map((t) => t.text).join("").replace(/\s+/g, " ").trim() : "";
   const selKey = normalize(selText);
-  const selCtx: Context | undefined = sel
-    ? { lesson: lesson.id, title: lesson.title, sid: all[sel.from].sid, sentence: doc.sentences[all[sel.from].sid] }
-    : undefined;
+  const ctxAt = (sid: number): Context => {
+    const media = lessonMedia(lesson.yt, sid);
+    return { lesson: lesson.id, title: lesson.title, sid, sentence: doc.sentences[sid] ?? "", ...(media ? { media } : {}) };
+  };
+  const selCtx: Context | undefined = sel ? ctxAt(all[sel.from].sid) : undefined;
 
   const selectWord = (i: number, extend = false) => {
     if (extend && anchor.current != null) {
@@ -307,6 +314,8 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
       }
       if (e.metaKey || e.ctrlKey || e.altKey || gsel.get()) return;
       const k = e.key;
+      // Video study owns sentence transport. Don't also turn the page or start a second narration.
+      if (study === "video" && lesson.yt && (k === "ArrowRight" || k === "ArrowLeft" || k === " " || k === "r" || k === "t" || k === "p")) return;
       let hit = true;
       if (mode === "sentence" && (k === "ArrowRight" || k === "ArrowLeft")) goSent(k === "ArrowRight" ? 1 : -1);
       else if (mode === "sentence" && (k === "ArrowDown" || k === "ArrowUp")) nav(k === "ArrowDown" ? 1 : -1);
@@ -451,7 +460,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
                       <button
                         className={`rd-keep ${on ? "is-on" : ""}`}
                         onClick={() => {
-                          const saved = reader.toggleSentence(text, { lesson: lesson.id, title: lesson.title, sid: g[0].sid, sentence: text });
+                          const saved = reader.toggleSentence(text, ctxAt(g[0].sid));
                           toast(saved ? "已存为句子" : "已移出语料", "ok");
                         }}
                         aria-label={on ? "移出语料" : "存这句到语料"}
@@ -511,13 +520,46 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   );
 
   return (
-    <div className={`page rd-page rd-lesson ${sel ? "has-sel" : ""}`}>
+    <div className={`page rd-page rd-lesson ${sel ? "has-sel" : ""} ${lesson.yt && study === "video" ? "is-video" : ""}`}>
       <header className="rd-lesson-head">
         <a href="#/reader" className="rd-back" aria-label="返回课程">
           <ArrowLeft size={18} />
           课程
         </a>
         <div className="rd-lesson-tools">
+          {lesson.yt && (
+            <div className="rd-seg" role="tablist" aria-label="学习方式" data-testid="study-toggle">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={study === "video"}
+                className={study === "video" ? "is-on" : ""}
+                onClick={() => {
+                  localStorage.setItem(STUDY_KEY, "video");
+                  tts.stop();
+                  setStudy("video");
+                }}
+                data-testid="study-video"
+              >
+                视频
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={study === "read"}
+                className={study === "read" ? "is-on" : ""}
+                onClick={() => {
+                  localStorage.setItem(STUDY_KEY, "read");
+                  setStudy("read");
+                }}
+                data-testid="study-read"
+              >
+                阅读
+              </button>
+            </div>
+          )}
+          {study === "read" && (
+            <>
           <div className="rd-seg" role="tablist" aria-label="阅读视图" data-testid="view-toggle">
             <button role="tab" aria-selected={mode === "sentence"} className={mode === "sentence" ? "is-on" : ""} onClick={() => switchMode("sentence")} data-testid="view-sentence">
               单句
@@ -545,6 +587,8 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
           <button className="rd-icon" onClick={() => setSize((x) => Math.min(30, x + 1))} aria-label="放大字号">
             A<small>+</small>
           </button>
+            </>
+          )}
           <button
             className="rd-icon"
             onClick={() => {
@@ -562,6 +606,10 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
 
       <div className="rd-grid">
         <article className="rd-article">
+        {lesson.yt && study === "video" ? (
+          <VideoStudy lesson={lesson} doc={doc} items={st.items} sel={sel} setSel={setSel} cur={cur} setCur={setCur} />
+        ) : (
+        <>
           <h1 className="rd-lesson-title">{lesson.title}</h1>
           {lesson.yt ? (
             <p className="rd-source rd-yt-meta">
@@ -661,7 +709,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
                       <button
                         className={`rd-sv-act ${on ? "is-on" : ""}`}
                         onClick={() => {
-                          const saved = reader.toggleSentence(text, { lesson: lesson.id, title: lesson.title, sid: cur, sentence: text });
+                          const saved = reader.toggleSentence(text, ctxAt(cur));
                           toast(saved ? "已存为句子" : "已移出语料", "ok");
                         }}
                         aria-label={on ? "移出语料" : "存这句到语料"}
@@ -762,6 +810,8 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
               ))}
             </div>
           )}
+        </>
+        )}
         </article>
 
         <aside className={`rd-aside ${sel ? "is-open" : ""}`} aria-label="词卡">

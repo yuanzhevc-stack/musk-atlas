@@ -1,10 +1,10 @@
 /** 今日 — built only from my own 语料 (reader + Musk): today's FSRS reviews, what I saved today, and a few to revisit. */
-import { ArrowRight, BookOpenText, GraduationCap, Pause, Play } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { ClipPlayer } from "../musk/ClipPlayer";
-import { clock, sentence as loadSentence, type Sentence } from "../musk/corpus";
+import { ArrowRight, BookOpenText, GraduationCap, Play } from "lucide-react";
+import { useState } from "react";
+import { clock } from "../musk/corpus";
 import { reader, useReader, type Item } from "../reader/model";
-import { muskLookup } from "../reader/MuskSays";
+import { SourcePlayer } from "../reader/CorpusPlay";
+import { MuskSays } from "../reader/MuskSays";
 import { formatInterval } from "../store/srs";
 import { dayKey } from "../store/store";
 import { KIND_LABEL, ReviewSheet } from "./Corpus";
@@ -170,6 +170,8 @@ function sourceHref(it: Item) {
 }
 
 function TodayCard({ it }: { it: Item }) {
+  const [show, setShow] = useState(false);
+  const [nonce, setNonce] = useState(0);
   const s = it.kind === "sentence" ? "" : (it.ctx?.sentence ?? "");
   const at = s.toLowerCase().indexOf(it.text.toLowerCase());
   const href = sourceHref(it);
@@ -180,7 +182,6 @@ function TodayCard({ it }: { it: Item }) {
         <span className={`rd-pill st-${it.status}`}>{statusText(it.status)}</span>
         {it.kind !== "word" && <em className="td-kind">{KIND_LABEL[it.kind]}</em>}
       </div>
-      {it.meaning && <p className="td-meaning">{it.meaning}</p>}
       {s && (
         <p className="td-ctx">
           {at >= 0 ? (
@@ -194,50 +195,25 @@ function TodayCard({ it }: { it: Item }) {
           )}
         </p>
       )}
-      <MuskClip it={it} />
+      <button type="button" className="rd-btn" onClick={() => setNonce(Date.now())} data-testid="today-source">
+        <Play size={14} /> 播放原片
+      </button>
+      {nonce > 0 && <SourcePlayer it={it} nonce={nonce} />}
+      {!show ? (
+        <button type="button" className="rd-btn" onClick={() => setShow(true)} data-testid="today-reveal">
+          显示释义
+        </button>
+      ) : (
+        <>
+          <p className="td-meaning">{it.meaning || "（没有释义）"}</p>
+          {it.kind !== "sentence" && <MuskSays q={it.key} compact />}
+        </>
+      )}
       {href && (
         <a className="td-src" href={href}>
-          {it.ctx?.musk ? `Musk · ${it.ctx.title.slice(0, 28)} · ${clock(it.ctx.musk.t)}` : `《${it.ctx!.title.slice(0, 24)}》`}
+          {it.ctx?.musk ? `原片 · ${it.ctx.title.slice(0, 28)} · ${clock(it.ctx.musk.t)}` : `《${it.ctx!.title.slice(0, 24)}》`}
         </a>
       )}
     </li>
-  );
-}
-
-/** First "Musk 怎么说" clip for the item, when the corpus has one. Sentences saved from Musk replay their own clip. */
-function MuskClip({ it }: { it: Item }) {
-  const [hit, setHit] = useState<{ s: Sentence; from: number; to: number; title: string } | null | undefined>(undefined);
-  const [on, setOn] = useState(0);
-  useEffect(() => {
-    let live = true;
-    setHit(undefined);
-    const p =
-      it.kind === "sentence"
-        ? it.ctx?.musk
-          ? loadSentence(it.ctx.sid).then((s) => (s && s.c ? { s, from: -1, to: -1, title: it.ctx!.title } : null))
-          : Promise.resolve(null)
-        : muskLookup(it.key, 1).then((r) => (r.hits[0] ? { s: r.hits[0].sentence, from: r.hits[0].from, to: r.hits[0].to, title: r.hits[0].video?.title ?? "" } : null));
-    p.then((h) => live && setHit(h), () => live && setHit(null));
-    return () => {
-      live = false;
-    };
-  }, [it.key, it.kind, it.ctx]);
-  const preview = useMemo(() => (hit ? hit.s.t : ""), [hit]);
-  if (!hit) return null;
-  return (
-    <div className={`td-musk ${on ? "is-on" : ""}`} data-testid="today-musk">
-      <button className="td-musk-btn" onClick={() => setOn(on ? 0 : Date.now())} data-testid="today-musk-play">
-        <span className="rd-play">{on ? <Pause size={11} fill="currentColor" /> : <Play size={11} fill="currentColor" />}</span>
-        <span>
-          <small>Musk 怎么说</small>
-          {!on && <span className="td-musk-line">{preview}</span>}
-        </span>
-      </button>
-      {on > 0 && (
-        <div className="rd-musk-stage">
-          <ClipPlayer sentence={hit.s} from={hit.from} to={hit.to} nonce={on} title={hit.title} />
-        </div>
-      )}
-    </div>
   );
 }

@@ -14,6 +14,7 @@ Routes: `#/reader` (lesson library, `#/reader?l=<lessonId>&s=<sentenceIdx>` open
 
 - Import a lesson (title, optional source URL, pasted text). Text is split into paragraphs → sentences → word tokens, paged at ~220 words.
 - Word colours as in LingQ: blue = new (not in corpus), yellow 1–4 fading = learning, known = no highlight, ignored = no highlight. Saved phrases get a yellow underline.
+- A lesson imported from YouTube opens on the video: desktop keeps the player on the left and the captions on the right; a narrow screen stacks the player above the captions. The sentence under the playhead is highlighted, and choosing any sentence seeks. The bar is replay / previous / next. Chinese stays folded until you ask; it is machine translation (MyMemory or Google) or an explicit failure, never a made-up line. 「阅读」 switches back to 单句 / 整页. Import stays on the lesson list.
 - Click a word → side panel (desktop ≥960px) / bottom sheet (phone, iPad portrait). Meanings (`src/reader/dict.ts`), shown as tappable suggestions with a source label: bundled offline **ECDICT** (`public/dict/`, sharded by prefix, one ≤400 KB shard per lookup, lemma/inflection aware: looks→look; rebuild with `python3 scripts/dict/build_ecdict.py ecdict.csv lemma.en.txt`) → Word Atlas lexicon → machine translation for phrases / misses (MyMemory, then Google gtx, 5 s timeout) → [dictionaryapi.dev](https://dictionaryapi.dev) English. Cached in memory + localStorage `musk-atlas:meaning:v1`. Saving with an empty meaning fills in the first suggestion. Editable meaning + notes, status 1–4 / known / ignore. TTS via the browser's speech synthesis (no recorded audio shipped).
 - Phrases: mouse-drag or Shift-click a second word; on touch use 「向前/向后扩展」.
 - Keys: `←/→` next/prev blue-or-yellow word · `b` next blue · `1–4` level · `k` known · `x` ignore · `h` edit meaning · `↑/↓ Enter` pick a hint · `s` speak · `m` play Musk · `Shift+←/→` page · `+/-` font size · `Esc` close. 「本页读完」 marks all remaining blue words on the page known and turns the page.
@@ -24,7 +25,7 @@ All in `src/reader/model.ts`, stored in localStorage key `musk-atlas:reader:v1` 
 
 ```ts
 Item { key, text, kind: "word"|"phrase", status: 1|2|3|4|5|-1, meaning, notes,
-       ctx?: { lesson, title, sid, sentence, musk?: { v, t } }, created, updated, srs?: CardState }
+       ctx?: { lesson, title, sid, sentence, musk?: { v, t, ms }, media?: { kind: "youtube", v, t, e } }, created, updated, srs?: CardState }
 ```
 
 - `key = normalize(text)`: lowercase, straight apostrophes, single spaces. This is the join key with Musk.
@@ -58,7 +59,7 @@ The key is already `wrangler secret put XAI_API_KEY` if TTS works. Optional vars
 - `EXPRESS_DAILY` — default `200` new model calls per UTC day. Repeats are stored in R2 at `express/v1/<sha256>.json` and do not count. This budget is separate from TTS `DAILY_CHARS`. A single isolate also refuses more than 12 calls a minute from one IP.
 
 Input is rejected unless it contains Chinese, is at most 120 characters (context 80), and the body is at most 4 KB. Model output that is not the JSON shape becomes an error, not a made-up card. Queries and the API key are not logged.
-- **Review**: `reader.addToReview(key)` attaches an FSRS card (`src/store/srs.ts`); 「复习」 on the corpus page grades due items. Separate from the Word Atlas daily path (`store.cards`).
+- **Review**: `reader.addToReview(key)` attaches an FSRS card (`src/store/srs.ts`); 「复习」 on the corpus page grades due items. The card plays the item's own YouTube span or uploaded clip first, then reveals the gloss. 「Musk 怎么说」 lists only voiceprint-confirmed lines. Separate from the Word Atlas daily path (`store.cards`). Older saves without `media` still resolve through the lesson's `yt` times. Nothing here clears `localStorage`.
 
 ## Credits & license
 
