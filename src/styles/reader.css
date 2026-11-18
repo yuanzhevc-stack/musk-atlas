@@ -1422,3 +1422,198 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
 .cp-stage, .cp-back { max-width: 560px; }
 .cp-others { max-width: 640px; }
 .cp-main .cp-pill { margin: 15px 0 0 16px; }
+
+/* ---------- video study ---------- */
+.rd-lesson.is-video.rd-page { max-width: 1240px; }
+.rd-lesson-head { flex-wrap: wrap; gap: 8px; }
+.rd-lesson.is-video .rd-grid { grid-template-columns: minmax(0, 1fr); }
+.rd-lesson.is-video .rd-article { max-width: none; }
+.rd-lesson.is-video {
+  background: radial-gradient(880px 360px at 0% 0%, rgba(22, 72, 52, 0.18), transparent 70%);
+}
+.vs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.vs-stage {
+  background: #10241c;
+  color: #f4f1ea;
+  border-radius: 22px;
+  padding: 12px;
+  box-shadow: 0 18px 50px -28px rgba(0, 0, 0, 0.55);
+}
+.vs-head h1 {
+  margin: 2px 4px 4px;
+  font-size: clamp(20px, 2.4vw, 28px);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+.vs-head p {
+  margin: 0 4px 10px;
+  color: rgba(244, 241, 234, 0.72);
+  font-size: 13px;
+}
+.vs-head a { color: inherit; }
+.vs-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #000;
+}
+.vs-frame iframe,
+.vs-yt-host {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.vs-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 18px;
+  text-align: center;
+  background: #10241c;
+  color: #f4f1ea;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.vs-overlay p { margin: 0; max-width: 28em; }
+.vs-overlay-quiet { pointer-events: none; background: color-mix(in oklab, #10241c 55%, transparent); }
+.vs-overlay button,
+.vs-overlay a,
+.musk-noclip a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border: 0.5px solid rgba(255, 255, 255, 0.28);
+  font-weight: 600;
+}
+.vs-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px;
+  border-radius: 999px;
+  background: color-mix(in oklab, #f6f3ec 78%, transparent);
+  color: #1c2430;
+  border: 0.5px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+  backdrop-filter: saturate(1.4) blur(18px);
+  -webkit-backdrop-filter: saturate(1.4) blur(18px);
+}
+.vs-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 0.5px solid rgba(28, 36, 48, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+  color: inherit;
+  font-weight: 600;
+  font-size: 13px;
+}
+.vs-bar button:disabled { opacity: 0.38; }
+.vs-bar button.is-on { background: #16382c; color: #f4f1ea; }
+.vs-count { margin-left: auto; padding-right: 8px; font-size: 12px; font-variant-numeric: tabular-nums; color: #3d4a44; }
+.vs-hint { margin: 8px 6px 0; font-size: 12px; color: rgba(244, 241, 234, 0.7); }
+.vs-subs {
+  min-width: 0;
+  border-radius: 22px;
+  background: color-mix(in oklab, var(--card) 94%, transparent);
+  border: 0.5px solid var(--rd-hair);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05);
+  padding: 8px;
+}
+.vs-sent {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px 10px;
+  border-radius: 16px;
+}
+.vs-sent.is-on {
+  background: color-mix(in oklab, #2f8f5b 14%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in oklab, #2f8f5b 40%, transparent);
+}
+.vs-jump {
+  min-width: 52px;
+  margin-top: 4px;
+  padding: 2px 0;
+  border-radius: 999px;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.vs-line.rd-text { margin: 0; font-size: 18px; line-height: 1.65; }
+.vs-tr {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.vs-tr small { display: block; margin-bottom: 2px; font-size: 11px; letter-spacing: 0.02em; color: var(--ink-3); }
+.musk-noclip {
+  align-content: center;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+  color: #d9d3c7;
+}
+.rd-review .rd-musk-stage,
+.cp-detail .rd-btn { margin-top: 8px; }
+@media (min-width: 900px) {
+  .vs {
+    display: grid;
+    grid-template-columns: minmax(320px, 1.12fr) minmax(280px, 0.88fr);
+    align-items: start;
+  }
+  .vs-stage { position: sticky; top: calc(var(--top) + 12px); }
+  .vs-subs { max-height: calc(100dvh - var(--top) - 36px); overflow: auto; position: relative; }
+}
+@media (max-width: 899px) {
+  .vs-stage { position: sticky; top: calc(var(--top) + 4px); z-index: 4; }
+  .vs-bar button span { display: none; }
+  .vs-bar button { padding: 0 10px; }
+  .vs-count { margin-left: 0; }
+}
+@media (min-width: 960px) {
+  .rd-lesson.is-video .rd-aside:not(.is-open) { display: none; }
+  .rd-lesson.is-video .rd-aside.is-open {
+    position: fixed;
+    top: auto;
+    left: auto;
+    right: max(16px, calc((100vw - 1240px) / 2 + 20px));
+    bottom: 16px;
+    width: min(440px, 38vw);
+    max-height: min(48dvh, 440px);
+    z-index: 45;
+    transform: none;
+  }
+  .rd-lesson.is-video.has-sel .vs-subs { scroll-padding-bottom: 28dvh; }
+}
+@media (max-width: 560px) {
+  .vs-line.rd-text { font-size: 17px; }
+}
+

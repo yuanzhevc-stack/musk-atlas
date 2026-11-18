@@ -45,7 +45,7 @@ export function MuskSays({ q, autoplay = false, compact = false }: { q: string; 
       (r) => {
         if (!live) return;
         setRes(r);
-        if (autoplay && r.hits[0]) setOn({ hit: r.hits[0], nonce: Date.now() });
+        if (autoplay && r.hits.some((h) => h.sentence.m === "musk")) setOn({ hit: r.hits.find((h) => h.sentence.m === "musk")!, nonce: Date.now() });
       },
       () => live && setErr(true),
     );
@@ -70,6 +70,8 @@ export function MuskSays({ q, autoplay = false, compact = false }: { q: string; 
         <p className="rd-dim">查找中…</p>
       ) : !res.hits.length ? (
         <p className="rd-dim">语料里还没有他说过这个</p>
+      ) : !res.hits.some((h) => h.sentence.m === "musk") ? (
+        <p className="rd-dim">没有已确认是马斯克说的</p>
       ) : (
         <>
           {on && (
@@ -78,7 +80,7 @@ export function MuskSays({ q, autoplay = false, compact = false }: { q: string; 
             </div>
           )}
           <ol className="rd-musk-list">
-            {res.hits.map((h) => (
+            {res.hits.filter((h) => h.sentence.m === "musk").map((h) => (
               <li key={h.id}>
                 <button className={on?.hit.id === h.id ? "is-on" : ""} onClick={() => setOn({ hit: h, nonce: Date.now() })} data-testid="musk-hit">
                   <span className="rd-play">

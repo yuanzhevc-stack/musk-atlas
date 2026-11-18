@@ -6,7 +6,9 @@ import { clock, findSentence, type Sentence } from "../musk/corpus";
 import { muskLookup } from "./MuskSays";
 import { MuskText } from "./MuskText";
 import { parse, useReader, type Item, type Lesson } from "./model";
+import { isConfirmedMusk, sourcePlan } from "./sync";
 import { tts, useTts } from "./tts";
+import { YoutubePlayer } from "./YoutubePlayer";
 import { watchUrl } from "./youtube";
 
 export type Clip = {
@@ -94,9 +96,10 @@ function useSource(it: Item, lessons: Lesson[]): Clip | null | undefined {
   const l = lessons.find((x) => x.id === ctx.lesson);
   const text = ctx.sentence;
   const [from, to] = it.kind === "sentence" ? [-1, -1] : rangeOf(text, it.key);
-  const sp = l ? spanOf(l, ctx.sid) : null;
-  if (l?.yt && sp) return { id: `l:${l.id}:${ctx.sid}`, text, from, to, title: ctx.title, src: "yt", v: l.yt.v, t: sp[0], e: sp[1] };
-  return { id: `t:${ctx.lesson}:${ctx.sid}`, text, from, to, title: ctx.title, src: "tts" };
+  const plan = sourcePlan(ctx, l);
+  if (plan.type === "youtube") return { id: `l:${ctx.lesson}:${ctx.sid}`, text, from, to, title: ctx.title, src: "yt", v: plan.v, t: plan.t, e: plan.e };
+  if (plan.type === "tts") return { id: `t:${ctx.lesson}:${ctx.sid}`, text, from, to, title: ctx.title, src: "tts" };
+  return null;
 }
 
 function Marked({ c }: { c: Clip }) {
@@ -118,20 +121,21 @@ function Stage({ c, nonce }: { c: Clip; nonce: number }) {
     tts.play(-1, c.text).then(() => tts.stop());
     return () => tts.stop();
   }, [c.id, nonce]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (c.src === "musk" && c.musk) return <ClipPlayer sentence={c.musk} from={c.from} to={c.to} nonce={nonce} title={c.title} />;
+  if (c.src === "musk" && c.musk)
+    return (
+      <>
+        {!isConfirmedMusk(c.musk.m) && (
+          <p className="rd-dim" data-testid="cp-unconfirmed">
+            这条原片的说话人未确认，不作为马斯克原声。
+          </p>
+        )}
+        <ClipPlayer sentence={c.musk} from={c.from} to={c.to} nonce={nonce} title={c.title} />
+      </>
+    );
   if (c.src === "yt")
     return (
       <>
-        <div className="rd-yt-frame cp-frame">
-          <iframe
-            key={`${c.id}:${nonce}`}
-            src={`https://www.youtube-nocookie.com/embed/${c.v}?start=${Math.floor(c.t!)}&end=${Math.ceil(c.e!)}&autoplay=1&playsinline=1&rel=0&cc_load_policy=0`}
-            title={c.title}
-            allow="autoplay; encrypted-media; picture-in-picture"
-            allowFullScreen
-            data-testid="cp-embed"
-          />
-        </div>
+        <YoutubePlayer videoId={c.v!} title={c.title} initial={c.t ?? 0} end={c.e} nonce={nonce} />
         <p className="musk-stage-text">
           <Marked c={c} />
         </p>
@@ -158,6 +162,19 @@ function Stage({ c, nonce }: { c: Clip; nonce: number }) {
   );
 }
 
+/** The saved item's own clip (YouTube, uploaded R2, or a spoken sentence when there is no video). */
+export function SourcePlayer({ it, nonce }: { it: Item; nonce: number }) {
+  const st = useReader();
+  const src = useSource(it, st.lessons);
+  if (src === undefined) return <p className="rd-dim" data-testid="src-loading">正在找原片…</p>;
+  if (!src) return <p className="rd-dim">没有原句</p>;
+  return (
+    <div className="rd-musk-stage" data-testid="source-player">
+      <Stage c={src} nonce={nonce} />
+    </div>
+  );
+}
+
 export function CorpusPlay({ it, replay }: { it: Item; replay: number }) {
   const st = useReader();
   const src = useSource(it, st.lessons);
@@ -177,7 +194,9 @@ export function CorpusPlay({ it, replay }: { it: Item; replay: number }) {
       (r) =>
         live &&
         setMusk(
-          r.hits.map((h) => ({ id: `m:${h.sentence.id}`, text: h.sentence.t, from: h.from, to: h.to, title: h.video?.title ?? h.sentence.v, src: "musk", musk: h.sentence, t: h.sentence.s, uncertain: h.sentence.m !== "musk" })),
+          r.hits
+            .filter((h) => isConfirmedMusk(h.sentence.m))
+            .map((h) => ({ id: `m:${h.sentence.id}`, text: h.sentence.t, from: h.from, to: h.to, title: h.video?.title ?? h.sentence.v, src: "musk" as const, musk: h.sentence, t: h.sentence.s })),
         ),
       () => live && setMusk([]),
     );

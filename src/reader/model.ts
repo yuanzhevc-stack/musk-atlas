@@ -21,6 +21,20 @@ export interface Context {
   sentence: string;
   /** Musk source (videoId@seconds) when the context is a Musk clip. */
   musk?: { v: string; t: number; ms?: number };
+  /**
+   * YouTube lesson source captured on first save.
+   * Older items omit this and still replay through the lesson's `yt` times.
+   * Never used to label a line as Musk.
+   */
+  media?: MediaRef;
+}
+
+/** Playback pointer for a YouTube lesson. Optional on items saved before video study. */
+export interface MediaRef {
+  kind: "youtube";
+  v: string;
+  t: number;
+  e?: number;
 }
 
 export interface Item {
