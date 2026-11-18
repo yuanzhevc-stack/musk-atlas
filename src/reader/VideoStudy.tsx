@@ -4,7 +4,7 @@ import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type Point
 import type { Item, Lesson, Token } from "./model";
 import { phraseIndex } from "./model";
 import { translate } from "./dict";
-import { sentenceAt } from "./sync";
+import { centerScroll, followAllowed, sentenceAt, shouldRecenter } from "./sync";
 import { YoutubePlayer, type PlayerHandle, type PlayerPhase } from "./YoutubePlayer";
 import { clockOf, watchUrl } from "./youtube";
 
@@ -140,7 +140,17 @@ export function VideoStudy({
   const [showTr, setShowTr] = useState(false);
   const [tr, setTr] = useState<Record<number, string>>({});
   const [hint, setHint] = useState("");
+  const [held, setHeld] = useState(false);
   const initial = useRef(times[cur] ?? 0);
+  const alignMode = useRef<"force" | "follow">("force");
+  const programmatic = useRef(false);
+  const holdTimer = useRef(0);
+  const lastSet = useRef(0);
+  const ignoreScrollUntil = useRef(0);
+  const selRef = useRef(sel);
+  const heldRef = useRef(held);
+  selRef.current = sel;
+  heldRef.current = held;
 
   const all = useMemo(() => doc.paragraphs.flatMap((p) => p.tokens), [doc]);
   const lines = useMemo(() => {
@@ -186,6 +196,10 @@ export function VideoStudy({
     }
     setHint("");
     hold.current = Date.now() + 1200;
+    alignMode.current = "force";
+    heldRef.current = false;
+    window.clearTimeout(holdTimer.current);
+    setHeld(false);
     setSel(null);
     setCur(sid);
     player.current?.seek(t);
@@ -199,8 +213,13 @@ export function VideoStudy({
     }
     setHint("");
     hold.current = Date.now() + 1200;
+    alignMode.current = "force";
+    heldRef.current = false;
+    window.clearTimeout(holdTimer.current);
+    setHeld(false);
     player.current?.seek(t);
     player.current?.play();
+    requestAnimationFrame(() => alignTo(curRef.current, "force"));
   };
   const step = (d: 1 | -1) => {
     const n = curRef.current + d;
@@ -297,23 +316,54 @@ export function VideoStudy({
     };
   }, [showTr, cur, doc.sentences, tr]);
 
-  useEffect(() => {
-    if (picking.current) return;
+  const alignTo = (sid: number, mode: "force" | "follow") => {
     const list = listRef.current;
-    const row = list?.querySelector<HTMLElement>(`[data-vs="${cur}"]`);
-    const token = sel ? list?.querySelector<HTMLElement>(`[data-ti="${sel.from}"]`) : null;
-    const target = token ?? row;
-    if (!list || !target) return;
-    if (list.scrollHeight <= list.clientHeight + 8) {
-      target.scrollIntoView({ block: "nearest", inline: "nearest" });
-      return;
-    }
-    const top = target.offsetTop;
-    const bottom = top + target.offsetHeight;
-    const pad = sel ? Math.min(220, list.clientHeight * 0.45) : 8;
-    if (top < list.scrollTop + 4) list.scrollTop = Math.max(0, top - 8);
-    else if (bottom > list.scrollTop + list.clientHeight - pad) list.scrollTop = bottom - list.clientHeight + pad;
-  }, [cur, sel]);
+    const row = list?.querySelector<HTMLElement>(`[data-vs="${sid}"]`);
+    if (!list || !row || list.clientHeight < 40) return;
+    if (mode === "follow" && !followAllowed({ picking: picking.current, cardOpen: selRef.current != null, userHold: heldRef.current })) return;
+    const itemTop = list.scrollTop + (row.getBoundingClientRect().top - list.getBoundingClientRect().top);
+    const next = centerScroll(list.clientHeight, list.scrollHeight, itemTop, row.offsetHeight);
+    if (mode === "follow" && !shouldRecenter(list.scrollTop, next)) return;
+    lastSet.current = next;
+    ignoreScrollUntil.current = performance.now() + 160;
+    programmatic.current = true;
+    list.scrollTop = next;
+    queueMicrotask(() => {
+      programmatic.current = false;
+    });
+  };
+  useEffect(() => {
+    const mode = alignMode.current;
+    alignMode.current = "follow";
+    let live = true;
+    const id = requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (live) alignTo(cur, mode);
+      }),
+    );
+    return () => {
+      live = false;
+      cancelAnimationFrame(id);
+    };
+  }, [cur, held, sel]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onListScroll = () => {
+    const list = listRef.current;
+    if (!list || programmatic.current || performance.now() < ignoreScrollUntil.current) return;
+    if (Math.abs(list.scrollTop - lastSet.current) < 48) return;
+    heldRef.current = true;
+    setHeld(true);
+    window.clearTimeout(holdTimer.current);
+    holdTimer.current = window.setTimeout(() => {
+      heldRef.current = false;
+      setHeld(false);
+    }, 8000);
+  };
+  const backToCurrent = () => {
+    heldRef.current = false;
+    window.clearTimeout(holdTimer.current);
+    setHeld(false);
+    alignTo(curRef.current, "force");
+  };
 
   const onTime = (t: number) => {
     if (picking.current || Date.now() < hold.current) return;
@@ -338,6 +388,24 @@ export function VideoStudy({
           </p>
         </header>
         <YoutubePlayer ref={player} videoId={yt.v} title={lesson.title} initial={initial.current} onTime={onTime} onPhase={setPhase} />
+        {lines[cur] && (
+          <div className="vs-now" data-testid="vs-now" data-sid={cur}>
+            <SentRow
+              sid={cur}
+              tokens={lines[cur].tokens}
+              active
+              selFrom={sel && lines[cur].tokens.some((t) => t.i >= sel.from && t.i <= sel.to) ? sel.from : -1}
+              selTo={sel && lines[cur].tokens.some((t) => t.i >= sel.from && t.i <= sel.to) ? sel.to : -1}
+              stamp={stampOf(lines[cur].tokens, items, phraseAt)}
+              timeLabel={times[cur] != null ? clockOf(times[cur]) : "–"}
+              showTr={showTr}
+              tr={tr[cur] ?? ""}
+              itemsRef={itemsRef}
+              phraseRef={phraseRef}
+              bus={bus}
+            />
+          </div>
+        )}
         <div className="vs-bar" role="group" aria-label="本句播放">
           <button type="button" onClick={() => step(-1)} disabled={cur <= 0} aria-label="上一句" data-testid="vs-prev">
             <SkipBack size={16} /> <span>上一句</span>
@@ -371,7 +439,12 @@ export function VideoStudy({
         )}
         <p className="vs-hint hide-touch">← → 上一句 / 下一句 · R 重播 · 空格播放 · T 中译 · 点词查释义，拖选短语</p>
       </div>
-      <div className="vs-subs" ref={listRef} role="list" aria-label="字幕">
+      <div className="vs-subs" ref={listRef} role="list" aria-label="字幕" data-testid="vs-subs" onScroll={onListScroll}>
+        {held && (
+          <button type="button" className="vs-return" onClick={backToCurrent} data-testid="vs-return">
+            回到当前句
+          </button>
+        )}
         {lines.map((line) => {
           const hit = !!sel && line.tokens.length > 0 && sel.to >= line.tokens[0].i && sel.from <= line.tokens[line.tokens.length - 1].i;
           return (
@@ -384,8 +457,8 @@ export function VideoStudy({
               selTo={hit && sel ? sel.to : -1}
               stamp={stampOf(line.tokens, items, phraseAt)}
               timeLabel={times[line.sid] != null ? clockOf(times[line.sid]) : "–"}
-              showTr={line.sid === cur && showTr}
-              tr={line.sid === cur ? (tr[line.sid] ?? "") : ""}
+              showTr={false}
+              tr=""
               itemsRef={itemsRef}
               phraseRef={phraseRef}
               bus={bus}

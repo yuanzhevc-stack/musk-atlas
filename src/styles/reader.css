@@ -1501,6 +1501,19 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
   border: 0.5px solid rgba(255, 255, 255, 0.28);
   font-weight: 600;
 }
+.vs-now {
+  margin-top: 10px;
+  padding: 2px 4px;
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--card) 78%, transparent);
+  color: var(--ink);
+  border: 0.5px solid var(--rd-hair);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+  backdrop-filter: saturate(1.4) blur(18px);
+  -webkit-backdrop-filter: saturate(1.4) blur(18px);
+}
+.vs-now .vs-sent { background: transparent; box-shadow: none; }
+.vs-now .vs-line.rd-text { font-size: clamp(18px, 2.1vw, 22px); line-height: 1.55; color: var(--ink); }
 .vs-bar {
   display: flex;
   flex-wrap: wrap;
@@ -1535,11 +1548,37 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
 .vs-hint { margin: 8px 6px 0; font-size: 12px; color: rgba(244, 241, 234, 0.7); }
 .vs-subs {
   min-width: 0;
+  min-height: 0;
   border-radius: 22px;
   background: color-mix(in oklab, var(--card) 94%, transparent);
   border: 0.5px solid var(--rd-hair);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05);
   padding: 8px;
+  position: relative;
+}
+.vs-return {
+  position: sticky;
+  top: 6px;
+  z-index: 2;
+  display: block;
+  margin: 0 auto 8px;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 0.5px solid var(--rd-hair);
+  background: color-mix(in oklab, var(--card) 82%, transparent);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.vs-subs .vs-sent {
+  opacity: 0.42;
+}
+.vs-subs .vs-sent.is-on {
+  opacity: 1;
 }
 .vs-sent {
   display: grid;
@@ -1549,10 +1588,11 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
   padding: 8px 10px;
   border-radius: 16px;
 }
-.vs-sent.is-on {
-  background: color-mix(in oklab, #2f8f5b 14%, transparent);
-  box-shadow: inset 0 0 0 0.5px color-mix(in oklab, #2f8f5b 40%, transparent);
+.vs-subs .vs-sent.is-on {
+  background: color-mix(in oklab, #2f8f5b 16%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in oklab, #2f8f5b 42%, transparent);
 }
+.vs-subs .vs-sent.is-on .vs-line.rd-text { font-size: 19px; color: var(--ink); }
 .vs-jump {
   min-width: 52px;
   margin-top: 4px;
@@ -1590,10 +1630,15 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
     align-items: start;
   }
   .vs-stage { position: sticky; top: calc(var(--top) + 12px); }
-  .vs-subs { max-height: calc(100dvh - var(--top) - 36px); overflow: auto; position: relative; }
+  .vs-subs {
+    height: calc(100dvh - var(--top) - 28px);
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
 }
 @media (max-width: 899px) {
-  .vs-stage { position: sticky; top: calc(var(--top) + 4px); z-index: 4; }
+  .vs-stage { position: static; }
+  .vs-subs { height: auto; overflow: visible; }
   .vs-bar button span { display: none; }
   .vs-bar button { padding: 0 10px; }
   .vs-count { margin-left: 0; }

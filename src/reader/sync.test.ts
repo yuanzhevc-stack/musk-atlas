@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isConfirmedMusk, lessonMedia, sentenceAt, sentenceSpan, sourcePlan, wordAt } from "./sync";
+import { centerScroll, followAllowed, isConfirmedMusk, lessonMedia, sentenceAt, sentenceSpan, shouldRecenter, sourcePlan, wordAt } from "./sync";
 
 const times = [0, 1.2, 4, 4, 9];
 
@@ -48,6 +48,31 @@ test("only a confirmed voiceprint is Musk", () => {
   assert.equal(isConfirmedMusk("not_musk"), false);
   assert.equal(isConfirmedMusk(null), false);
   assert.equal(isConfirmedMusk(undefined), false);
+});
+
+test("transcript centers the current line and stays inside the pane", () => {
+  assert.equal(centerScroll(200, 1000, 500, 40), 420);
+  assert.equal(centerScroll(200, 1000, 0, 40), 0);
+  assert.equal(centerScroll(200, 1000, 960, 40), 800);
+  assert.equal(centerScroll(400, 400, 200, 40), 0);
+  assert.equal(centerScroll(0, 1000, 100, 20), 0);
+  assert.equal(shouldRecenter(420, 430), false);
+  assert.equal(shouldRecenter(0, 420), true);
+});
+
+test("a clock tick just before the next sentence does not switch early", () => {
+  const marks = [0, 10, 20, 30];
+  assert.equal(sentenceAt(marks, 9.99), 0);
+  assert.equal(sentenceAt(marks, 10), 1);
+  assert.equal(sentenceAt(marks, 19.5), 1);
+  assert.equal(sentenceAt(marks, 30), 3);
+});
+
+test("follow pauses while selecting, while a card is open, or after a manual scroll", () => {
+  assert.equal(followAllowed({ picking: false, cardOpen: false, userHold: false }), true);
+  assert.equal(followAllowed({ picking: true, cardOpen: false, userHold: false }), false);
+  assert.equal(followAllowed({ picking: false, cardOpen: true, userHold: false }), false);
+  assert.equal(followAllowed({ picking: false, cardOpen: false, userHold: true }), false);
 });
 
 test("word highlight index changes only when the spoken word changes", () => {
