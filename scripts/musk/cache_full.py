@@ -22,10 +22,17 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 MIN_BYTES = 2_000_000
 MIN_SECONDS = 20
+# workers.dev Browser Integrity Check blocks the default Python urllib agent
+# with error 1010 before the Worker runs. Cloudflare's workers.dev docs say to
+# send a descriptive application User-Agent, and that it does not need to be a browser.
+# https://developers.cloudflare.com/workers/configuration/routing/workers-dev/
+APP_USER_AGENT = "musk-atlas-cache/1.0 (+https://yuanzhevc-stack.github.io/musk-atlas/)"
+WORKER_HOST = "musk-atlas-tts.yuanzhevc.workers.dev"
 REFUSED_MARKS = ("sign in to confirm", "not a bot", "login required", "confirm you’re not a bot", "confirm you're not a bot")
 
 
@@ -46,22 +53,44 @@ def ffprobe_duration(path: str) -> float:
     return float(out.strip())
 
 
-def post(url: str, secret: str, payload: dict) -> dict:
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={"Authorization": f"Bearer {secret}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=60) as res:
+def ytdlp_command(video_id: str, target: str) -> list[str]:
+    return [
+        "yt-dlp",
+        "--no-playlist",
+        "--no-cache-dir",
+        "--retries",
+        "2",
+        "-f",
+        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
+        "-o",
+        target,
+        f"https://www.youtube.com/watch?v={video_id}",
+    ]
+
+
+def worker_request(url: str, secret: str, method: str, data: bytes | None, content_type: str | None, timeout: int) -> dict:
+    """Call this Worker's own cache API. The User-Agent identifies the app; it is not a browser."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != WORKER_HOST:
+        raise RuntimeError("refusing a request that is not the cache worker")
+    headers = {
+        "User-Agent": APP_USER_AGENT,
+        "Authorization": f"Bearer {secret}",
+    }
+    if content_type:
+        headers["Content-Type"] = content_type
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=timeout) as res:
         return json.loads(res.read().decode())
+
+
+def post(url: str, secret: str, payload: dict) -> dict:
+    return worker_request(url, secret, "POST", json.dumps(payload).encode(), "application/json", 60)
 
 
 def put_part(url: str, secret: str, video_id: str, upload_id: str, part: int, chunk: bytes, last: bool) -> str:
     target = f"{url}/full/upload/part?v={video_id}&uploadId={upload_id}&part={part}&last={'1' if last else '0'}"
-    req = urllib.request.Request(target, data=chunk, headers={"Authorization": f"Bearer {secret}"}, method="PUT")
-    with urllib.request.urlopen(req, timeout=300) as res:
-        return json.loads(res.read().decode())["etag"]
+    return worker_request(target, secret, "PUT", chunk, None, 300)["etag"]
 
 
 def upload_via_worker(worker: str, secret: str, video_id: str, path: str, size: int, duration: float) -> dict:
@@ -99,22 +128,7 @@ def run_once(worker: str, secret: str) -> int:
         return 1
     with tempfile.TemporaryDirectory(prefix="full-cache-") as tmp:
         target = os.path.join(tmp, f"{video_id}.mp4")
-        proc = subprocess.run(
-            [
-                "yt-dlp",
-                "--no-playlist",
-                "--no-cache-dir",
-                "--retries",
-                "2",
-                "-f",
-                "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
-                "-o",
-                target,
-                f"https://www.youtube.com/watch?v={video_id}",
-            ],
-            capture_output=True,
-            text=True,
-        )
+        proc = subprocess.run(ytdlp_command(video_id, target), capture_output=True, text=True)
         text = (proc.stdout or "") + "\n" + (proc.stderr or "")
         kind = classify_ytdlp(proc.returncode, text)
         if kind != "downloaded" or not os.path.isfile(target) or target.endswith(".part"):
