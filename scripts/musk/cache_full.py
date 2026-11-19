@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 
 MIN_BYTES = 2_000_000
@@ -128,7 +129,12 @@ def main() -> int:
     if shutil.which("yt-dlp") is None or shutil.which("ffprobe") is None:
         print("yt-dlp and ffprobe must be installed on the machine that runs this.", file=sys.stderr)
         return 1
-    return run_once(worker, secret)
+    loop = "--loop" in sys.argv
+    while True:
+        code = run_once(worker, secret)
+        if not loop:
+            return code
+        time.sleep(60 if code == 0 else 30)
 
 
 if __name__ == "__main__":
