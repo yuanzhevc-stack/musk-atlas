@@ -1,16 +1,15 @@
-/** Native playback of a file the user picked. The clock is the file's own currentTime. */
+/** Native playback of a hosted full lesson. The clock is the file's own currentTime. */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { PlayerHandle, PlayerPhase } from "./YoutubePlayer";
 
 export const LocalPlayer = forwardRef<PlayerHandle, {
-  file: File;
+  src: string;
   title: string;
   initial: number;
   onTime?: (seconds: number) => void;
   onPhase?: (phase: PlayerPhase) => void;
-}>(function LocalPlayer({ file, title, initial, onTime, onPhase }, ref) {
+}>(function LocalPlayer({ src, title, initial, onTime, onPhase }, ref) {
   const video = useRef<HTMLVideoElement>(null);
-  const url = useRef<string | null>(null);
   const onTimeRef = useRef(onTime);
   const onPhaseRef = useRef(onPhase);
   const initialRef = useRef(initial);
@@ -51,8 +50,6 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
   useEffect(() => {
     const v = video.current;
     if (!v) return;
-    const src = URL.createObjectURL(file);
-    url.current = src;
     v.src = src;
     const seekAndPlay = () => {
       try {
@@ -67,9 +64,8 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
       v.pause();
       v.removeAttribute("src");
       v.load();
-      URL.revokeObjectURL(src);
     };
-  }, [file]);
+  }, [src]);
 
   const emit = () => {
     const t = video.current?.currentTime;
@@ -101,7 +97,7 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
       )}
       {phase === "error" && (
         <div className="vs-overlay" data-testid="local-error">
-          <p>这个文件打不开。可以另选一个视频，或改用在线。</p>
+          <p>这段缓存视频打不开。可以改用在线。</p>
         </div>
       )}
     </div>

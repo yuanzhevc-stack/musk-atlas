@@ -293,7 +293,7 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
           <div className="vs-overlay-actions">
             {onUseLocal && (
               <button type="button" onClick={onUseLocal} data-testid="yt-use-local">
-                选择本地视频
+                看本地缓存
               </button>
             )}
             <a href={outbound} target="_blank" rel="noreferrer">
@@ -335,7 +335,7 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
             </button>
             {onUseLocal && (
               <button type="button" onClick={onUseLocal} data-testid="yt-use-local">
-                选择本地视频
+                看本地缓存
               </button>
             )}
             <a href={outbound} target="_blank" rel="noreferrer">

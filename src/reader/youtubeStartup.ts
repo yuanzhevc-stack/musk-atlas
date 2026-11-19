@@ -3,7 +3,7 @@ export const YOUTUBE_STARTUP_MS = 8000;
 
 /** Does not claim the viewer's network failed. The in-page player simply did not become ready. */
 export const YOUTUBE_STARTUP_MESSAGE =
-  "页内的 YouTube 播放器没有在限定时间内就绪。可以重试，选择本机视频，或到 YouTube 打开。";
+  "页内的 YouTube 播放器没有在限定时间内就绪。可以重试，看已有缓存，或到 YouTube 打开。";
 
 export type StartupPhase = "loading" | "playing" | "paused" | "blocked" | "embed" | "missing" | "error";
 
