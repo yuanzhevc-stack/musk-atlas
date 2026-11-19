@@ -36,6 +36,23 @@ function bucket(): JobBucket & { store: Map<string, string>; sizes: Map<string, 
     async list(prefix) {
       return [...store.keys()].filter((k) => k.startsWith(prefix));
     },
+    async createMultipart(key) {
+      const uploadId = `up-${key}`;
+      sizes.set(`upload:${uploadId}`, 0);
+      return { uploadId };
+    },
+    async uploadPart(_key, uploadId, partNumber, body) {
+      const prev = sizes.get(`upload:${uploadId}`) ?? 0;
+      sizes.set(`upload:${uploadId}`, prev + body.byteLength);
+      sizes.set(`part:${uploadId}:${partNumber}`, body.byteLength);
+      return { partNumber, etag: `etag-${partNumber}` };
+    },
+    async completeMultipart(key, uploadId, parts) {
+      let total = 0;
+      for (const part of parts) total += sizes.get(`part:${uploadId}:${part.partNumber}`) ?? 0;
+      sizes.set(key, total);
+    },
+    async abortMultipart() {},
   };
 }
 
@@ -121,6 +138,41 @@ test("ready requires the real object, not a sentence clip", async () => {
   const body = await pub.json();
   assert.equal(body.status, "ready");
   assert.equal(body.url.includes("/clips/"), false);
+});
+
+test("a secret-backed upload can finish a full object and stays closed without the secret", async () => {
+  const b = bucket();
+  const closed = await handleFullCache(new Request("https://worker.test/full/upload/start", { method: "POST", body: JSON.stringify({ v: id }) }), b, headers, { secret: "", now: 1_000 });
+  assert.equal(closed.status, 503);
+  const opened = await handleFullCache(
+    new Request("https://worker.test/full/upload/start", { method: "POST", headers: { Authorization: `Bearer ${secret}` }, body: JSON.stringify({ v: id }) }),
+    b,
+    headers,
+    { secret, now: 1_000 },
+  );
+  assert.equal(opened.status, 200);
+  const { uploadId } = await opened.json();
+  const chunk = new Uint8Array(MIN_FULL_BYTES);
+  const part = await handleFullCache(
+    new Request(`https://worker.test/full/upload/part?v=${id}&uploadId=${uploadId}&part=1&last=1`, { method: "PUT", headers: { Authorization: `Bearer ${secret}` }, body: chunk }),
+    b,
+    headers,
+    { secret, now: 2_000 },
+  );
+  assert.equal(part.status, 200);
+  const done = await handleFullCache(
+    new Request("https://worker.test/full/upload/complete", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ v: id, uploadId, parts: [{ partNumber: 1, etag: "etag-1" }], bytes: MIN_FULL_BYTES, duration: 114 }),
+    }),
+    b,
+    headers,
+    { secret, now: 3_000 },
+  );
+  assert.equal(done.status, 200);
+  assert.equal((await done.json()).status, "ready");
+  assert.equal(b.store.has(`full/ready/${id}.json`), true);
 });
 
 test("the public enqueue route rejects an arbitrary url", async () => {
