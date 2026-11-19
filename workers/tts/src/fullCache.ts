@@ -9,6 +9,9 @@ export const MAX_ATTEMPTS = 2;
 export const DAILY_NEW = 6;
 export const MIN_FULL_BYTES = 2_000_000;
 export const MIN_FULL_SECONDS = 20;
+export const MIN_PART_BYTES = 5 * 1024 * 1024;
+export const MAX_PART_BYTES = 80 * 1024 * 1024;
+export const MAX_OBJECT_BYTES = 512 * 1024 * 1024;
 export const STALE_MS = 20 * 60 * 1000;
 export const PUBLIC_BASE = "https://pub-ad0e50befa7b4387a7d73a8c8a796eb3.r2.dev";
 
@@ -38,18 +41,33 @@ export interface JobObject {
   text(): Promise<string>;
   size?: number;
 }
+export interface UploadedPart {
+  partNumber: number;
+  etag: string;
+}
 export interface JobBucket {
   get(key: string): Promise<JobObject | null>;
   head(key: string): Promise<{ size: number } | null>;
   put(key: string, value: string, opts?: { httpMetadata?: { contentType?: string; cacheControl?: string } }): Promise<void>;
   list(prefix: string): Promise<string[]>;
+  createMultipart(key: string): Promise<{ uploadId: string }>;
+  uploadPart(key: string, uploadId: string, partNumber: number, body: ArrayBuffer): Promise<UploadedPart>;
+  completeMultipart(key: string, uploadId: string, parts: UploadedPart[]): Promise<void>;
+  abortMultipart(key: string, uploadId: string): Promise<void>;
 }
 
 export const jobKey = (v: string) => `full/jobs/${v}.json`;
 export const readyKey = (v: string) => `full/ready/${v}.json`;
 export const mediaKey = (v: string) => `full/${v}.mp4`;
 export const fullMediaUrl = (v: string) => `${PUBLIC_BASE}/full/${v}.mp4`;
+export const uploadKey = (v: string) => `full/uploads/${v}.json`;
 const budgetKey = (day: string) => `full/_budget/${day}.json`;
+
+export function partSizeOk(size: number, isLast: boolean): boolean {
+  if (!Number.isFinite(size) || size <= 0 || size > MAX_PART_BYTES) return false;
+  if (!isLast && size < MIN_PART_BYTES) return false;
+  return true;
+}
 
 export function youtubeOnly(input: unknown): string | null {
   if (typeof input !== "string") return null;
@@ -217,9 +235,77 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
   const authed = bearerOk(req.headers.get("Authorization"), opts.secret);
   const runner: FullJob["runner"] = opts.secret ? "configured" : "missing";
 
-  if (url.pathname === "/full/claim") {
+  if (url.pathname === "/full/upload/start" || url.pathname === "/full/upload/part" || url.pathname === "/full/upload/complete" || url.pathname === "/full/claim" || url.pathname === "/full/result") {
     if (!opts.secret) return json({ error: "runner-not-configured" }, 503, headers);
     if (!authed) return json({ error: "unauthorized" }, 401, headers);
+  }
+  if (url.pathname === "/full/upload/start") {
+    if (req.method !== "POST") return json({ error: "method" }, 405, headers);
+    let body: { v?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "bad-json" }, 400, headers);
+    }
+    const v = youtubeOnly(body.v);
+    if (!v) return json({ error: "bad-video" }, 400, headers);
+    const existing = await bucket.get(uploadKey(v));
+    if (existing) {
+      try {
+        const prev = JSON.parse(await existing.text()) as { uploadId?: string };
+        if (prev.uploadId) await bucket.abortMultipart(mediaKey(v), prev.uploadId);
+      } catch {
+        /* a stale session should not block a new one */
+      }
+    }
+    const opened = await bucket.createMultipart(mediaKey(v));
+    await bucket.put(uploadKey(v), JSON.stringify({ uploadId: opened.uploadId, created: opts.now }), {
+      httpMetadata: { contentType: "application/json", cacheControl: "no-store" },
+    });
+    return json({ v, uploadId: opened.uploadId }, 200, headers);
+  }
+  if (url.pathname === "/full/upload/part") {
+    if (req.method !== "PUT") return json({ error: "method" }, 405, headers);
+    const v = youtubeOnly(url.searchParams.get("v"));
+    const uploadId = url.searchParams.get("uploadId") ?? "";
+    const partNumber = Number(url.searchParams.get("part"));
+    const isLast = url.searchParams.get("last") === "1";
+    if (!v || !uploadId || !Number.isInteger(partNumber) || partNumber < 1 || partNumber > 100) return json({ error: "bad-part" }, 400, headers);
+    const session = await bucket.get(uploadKey(v));
+    const saved = session ? (JSON.parse(await session.text()) as { uploadId?: string }) : {};
+    if (saved.uploadId !== uploadId) return json({ error: "unknown-upload" }, 409, headers);
+    const body = await req.arrayBuffer();
+    if (!partSizeOk(body.byteLength, isLast)) return json({ error: "bad-part-size" }, 413, headers);
+    const part = await bucket.uploadPart(mediaKey(v), uploadId, partNumber, body);
+    return json(part, 200, headers);
+  }
+  if (url.pathname === "/full/upload/complete") {
+    if (req.method !== "POST") return json({ error: "method" }, 405, headers);
+    let body: { v?: unknown; uploadId?: unknown; parts?: unknown; bytes?: unknown; duration?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "bad-json" }, 400, headers);
+    }
+    const v = youtubeOnly(body.v);
+    const uploadId = typeof body.uploadId === "string" ? body.uploadId : "";
+    const parts = Array.isArray(body.parts) ? body.parts.flatMap((p) => {
+      if (!p || typeof p !== "object") return [];
+      const row = p as { partNumber?: unknown; etag?: unknown };
+      if (typeof row.partNumber !== "number" || typeof row.etag !== "string" || !row.etag) return [];
+      return [{ partNumber: row.partNumber, etag: row.etag }];
+    }) : [];
+    if (!v || !uploadId || !parts.length) return json({ error: "bad-video" }, 400, headers);
+    const bytes = typeof body.bytes === "number" ? body.bytes : NaN;
+    if (bytes > MAX_OBJECT_BYTES) return json({ error: "too-large" }, 413, headers);
+    const session = await bucket.get(uploadKey(v));
+    const saved = session ? (JSON.parse(await session.text()) as { uploadId?: string }) : {};
+    if (saved.uploadId !== uploadId) return json({ error: "unknown-upload" }, 409, headers);
+    await bucket.completeMultipart(mediaKey(v), uploadId, parts);
+    const result = await report(bucket, v, "ready", opts.now, { bytes, duration: typeof body.duration === "number" ? body.duration : undefined });
+    return json(result.job, result.status, headers);
+  }
+  if (url.pathname === "/full/claim") {
     if (req.method !== "POST") return json({ error: "method" }, 405, headers);
     const job = await claim(bucket, opts.now);
     return json({ job }, 200, headers);

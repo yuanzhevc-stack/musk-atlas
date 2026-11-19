@@ -7,8 +7,8 @@ this cloud VM. It does not use cookies, proxies, or a private YouTube client.
 Environment:
   CACHE_WORKER_URL   https://musk-atlas-tts.yuanzhevc.workers.dev
   CACHE_JOB_SECRET   same value as `wrangler secret put CACHE_JOB_SECRET`
-  The machine also needs `yt-dlp`, `ffmpeg`, `ffprobe`, and `npx wrangler` logged into
-  the account that owns bucket musk-atlas-clips.
+  The machine also needs `yt-dlp`, `ffmpeg`, and `ffprobe`.
+  Upload uses the Worker, so wrangler and R2_API_TOKEN are not required.
 
 YouTube refusing the download is reported as refused and is not retried here.
 """
@@ -57,16 +57,37 @@ def post(url: str, secret: str, payload: dict) -> dict:
         return json.loads(res.read().decode())
 
 
-def upload(bucket: str, video_id: str, path: str) -> None:
-    wrangler = shutil.which("wrangler") or shutil.which("npx")
-    if not wrangler:
-        raise RuntimeError("uploader-missing")
-    cmd = [wrangler] if shutil.which("wrangler") else ["npx", "wrangler"]
-    cmd += ["r2", "object", "put", f"{bucket}/full/{video_id}.mp4", "--file", path, "--content-type", "video/mp4", "--remote"]
-    subprocess.check_call(cmd)
+def put_part(url: str, secret: str, video_id: str, upload_id: str, part: int, chunk: bytes, last: bool) -> str:
+    target = f"{url}/full/upload/part?v={video_id}&uploadId={upload_id}&part={part}&last={'1' if last else '0'}"
+    req = urllib.request.Request(target, data=chunk, headers={"Authorization": f"Bearer {secret}"}, method="PUT")
+    with urllib.request.urlopen(req, timeout=300) as res:
+        return json.loads(res.read().decode())["etag"]
 
 
-def run_once(worker: str, secret: str, bucket: str = "musk-atlas-clips") -> int:
+def upload_via_worker(worker: str, secret: str, video_id: str, path: str, size: int, duration: float) -> dict:
+    """Authenticated multipart upload through the Worker R2 binding. The R2 credential stays on the Worker."""
+    base = worker.rstrip("/")
+    opened = post(base + "/full/upload/start", secret, {"v": video_id})
+    upload_id = opened["uploadId"]
+    part_size = 8 * 1024 * 1024
+    parts = []
+    with open(path, "rb") as handle:
+        number = 1
+        while True:
+            chunk = handle.read(part_size)
+            if not chunk:
+                break
+            etag = put_part(base, secret, video_id, upload_id, number, chunk, handle.tell() >= size)
+            parts.append({"partNumber": number, "etag": etag})
+            number += 1
+    return post(
+        base + "/full/upload/complete",
+        secret,
+        {"v": video_id, "uploadId": upload_id, "parts": parts, "bytes": size, "duration": duration},
+    )
+
+
+def run_once(worker: str, secret: str) -> int:
     claimed = post(worker.rstrip("/") + "/full/claim", secret, {})
     job = claimed.get("job")
     if not job:
@@ -110,8 +131,8 @@ def run_once(worker: str, secret: str, bucket: str = "musk-atlas-clips") -> int:
             print(f"rejected size={size} duration={duration}")
             return 3
         try:
-            upload(bucket, video_id, target)
-        except (RuntimeError, subprocess.CalledProcessError) as exc:
+            upload_via_worker(worker, secret, video_id, target, size, duration)
+        except Exception as exc:
             post(worker.rstrip("/") + "/full/result", secret, {"v": video_id, "outcome": "failed", "error": str(exc)[:180]})
             print(exc)
             return 4

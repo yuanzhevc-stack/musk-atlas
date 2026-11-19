@@ -59,6 +59,20 @@ function asJobBucket(bucket: R2Bucket) {
       }
       return out;
     },
+    async createMultipart(key: string) {
+      const opened = await bucket.createMultipartUpload(key, { httpMetadata: { contentType: "video/mp4" } });
+      return { uploadId: opened.uploadId };
+    },
+    async uploadPart(key: string, uploadId: string, partNumber: number, body: ArrayBuffer) {
+      const part = await bucket.resumeMultipartUpload(key, uploadId).uploadPart(partNumber, body);
+      return { partNumber: part.partNumber, etag: part.etag };
+    },
+    async completeMultipart(key: string, uploadId: string, parts: { partNumber: number; etag: string }[]) {
+      await bucket.resumeMultipartUpload(key, uploadId).complete(parts);
+    },
+    async abortMultipart(key: string, uploadId: string) {
+      await bucket.resumeMultipartUpload(key, uploadId).abort();
+    },
   };
 }
 
@@ -79,7 +93,7 @@ async function sha256(s: string) {
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname === "/full/claim" || url.pathname === "/full/result") {
+    if (url.pathname === "/full/claim" || url.pathname === "/full/result" || url.pathname.startsWith("/full/upload/")) {
       return handleFullCache(req, asJobBucket(env.BUCKET), {}, { secret: env.CACHE_JOB_SECRET ?? "", now: Date.now() });
     }
     const origin = req.headers.get("Origin") ?? "";
