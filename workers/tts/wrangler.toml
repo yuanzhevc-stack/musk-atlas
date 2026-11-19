@@ -13,4 +13,7 @@ DAILY_CHARS = "200000"
 binding = "BUCKET"
 bucket_name = "musk-atlas-clips"
 
-# Secret (not in this file): XAI_API_KEY  — `wrangler secret put XAI_API_KEY`
+# Secret (not in this file): XAI_API_KEY — `npx wrangler secret put XAI_API_KEY`
+# Secret (not in this file): CACHE_JOB_SECRET — `npx wrangler secret put CACHE_JOB_SECRET`
+# The full-video downloader is scripts/musk/cache_full.py on a machine you run.
+# This Worker only stores the job and checks the uploaded object. It does not download YouTube.

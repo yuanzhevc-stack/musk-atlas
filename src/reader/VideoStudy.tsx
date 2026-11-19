@@ -5,7 +5,8 @@ import type { Item, Lesson, Token } from "./model";
 import { phraseIndex } from "./model";
 import { translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
-import { explicitFiles, lookupLocalFile, pickDirectoryHandle, pickFileHandles, readChoice, requestHandlePermission, saveChoice, sessionFile, storeDirectoryHandle, storeFileHandle, supportsDirectoryPicker, type LocalLookup, type SourceChoice } from "./localVideo";
+import { saveChoice, type SourceChoice } from "./hostedLesson";
+import { adoptReady, cacheStatusLine, enqueueFullCache, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, type CacheView } from "./fullCache";
 import { centerScroll, followAllowed, sentenceAt, shouldRecenter } from "./sync";
 import { YoutubePlayer, type PlayerHandle, type PlayerPhase } from "./YoutubePlayer";
 import { clockOf, watchUrl } from "./youtube";
@@ -143,14 +144,11 @@ export function VideoStudy({
   const [tr, setTr] = useState<Record<number, string>>({});
   const [hint, setHint] = useState("");
   const [held, setHeld] = useState(false);
-  const [source, setSource] = useState<SourceChoice>(() => (sessionFile(yt.v) && readChoice(yt.v) !== "online" ? "local" : "online"));
-  const [local, setLocal] = useState<LocalLookup | { status: "checking" }>({ status: "checking" });
-  const [localNote, setLocalNote] = useState("");
-  const [asked, setAsked] = useState(false);
-  const [handleSaved, setHandleSaved] = useState(true);
+  const [source, setSource] = useState<SourceChoice>(() => openingSource(yt.v));
+  const started = useRef(source);
+  const [job, setJob] = useState<CacheView | null>(() => rememberedJob(yt.v));
   const [bootAt, setBootAt] = useState(() => times[cur] ?? 0);
   const clock = useRef(times[cur] ?? 0);
-  const fileRef = useRef<HTMLInputElement>(null);
   const alignMode = useRef<"force" | "follow">("force");
   const programmatic = useRef(false);
   const holdTimer = useRef(0);
@@ -380,19 +378,32 @@ export function VideoStudy({
     const i = sentenceAt(timesRef.current, t);
     setCur((c) => (c === i ? c : i));
   };
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
   useEffect(() => {
-    let live = true;
-    setLocal({ status: "checking" });
-    lookupLocalFile(yt.v, lesson.title).then((found) => {
-      if (!live) return;
-      setLocal(found);
-      setHandleSaved(found.status === "ready" ? found.remembered : true);
-      if (found.status === "ready" && readChoice(yt.v) !== "online") setSource("local");
-    });
-    return () => {
-      live = false;
+    let stop = false;
+    let posted = false;
+    const tick = async () => {
+      if (!posted) {
+        posted = true;
+        await enqueueFullCache(yt.v);
+      }
+      const next = await readFullCache(yt.v);
+      if (stop) return;
+      setJob(next);
+      const now = phaseRef.current;
+      const phaseKind = now === "loading" || now === "playing" || now === "paused" ? now : "other";
+      if (adoptReady(started.current, phaseKind, next.verified) === "online") setSource("online");
     };
-  }, [yt.v, lesson.title]);
+    void tick();
+    const id = window.setInterval(() => void tick(), 10_000);
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
+  }, [yt.v]);
+  const readyUrl = (job?.verified ? job.url : rememberedReady(yt.v)?.url) ?? "";
+  const playingCache = source === "local" && readyUrl === fullMediaUrl(yt.v);
   const switchSource = (next: SourceChoice) => {
     const reported = player.current?.getTime();
     const t = typeof reported === "number" && reported >= 0.4 ? reported : clock.current;
@@ -402,94 +413,12 @@ export function VideoStudy({
     setSource(next);
   };
   const chooseLocal = () => {
-    if (local.status === "ready") {
+    if (playingCache || job?.verified) {
       switchSource("local");
       return;
     }
-    const reported = player.current?.getTime();
-    const t = typeof reported === "number" && reported >= 0.4 ? reported : clock.current;
-    setBootAt(Number.isFinite(t) ? t : (times[cur] ?? 0));
-    setAsked(true);
-    if (local.status === "need-permission") {
-      void reauth();
-      return;
-    }
-    void pickFile();
   };
-  const takeFile = (file: File, loose: boolean, saved: boolean) => {
-    setLocal({ status: "ready", file, remembered: saved });
-    setHandleSaved(saved);
-    setLocalNote(loose ? `文件名和课程标题对不上，仍用「${file.name}」播放这一节。文件留在本机，不会上传。` : saved ? "" : "这次没能记住文件位置。刷新后需要再选。文件不会上传。");
-    saveChoice(yt.v, "local");
-    setSource("local");
-  };
-  const onPicked = (list: FileList | File[] | null) => {
-    const result = explicitFiles(yt.v, lesson.title, [...(list ?? [])]);
-    if (!result.file) {
-      setLocalNote(result.unmatched ? "这几个文件名对不上这节课。请只选要播放的那一个，或改用在线。" : "没有选到视频文件。");
-      return;
-    }
-    takeFile(result.file, result.loose, false);
-  };
-  const pickFile = async () => {
-    const handles = await pickFileHandles();
-    if (handles === null) {
-      fileRef.current?.click();
-      return;
-    }
-    if (!handles.length) return;
-    const files = await Promise.all(handles.map((h) => h.getFile()));
-    const result = explicitFiles(yt.v, lesson.title, files);
-    if (!result.file) {
-      setLocalNote("这几个文件名对不上这节课。请只选要播放的那一个，或改用在线。");
-      return;
-    }
-    const own = handles.find((h) => h.name === result.file?.name);
-    const saved = own ? await storeFileHandle(yt.v, own) : false;
-    takeFile(result.file, result.loose, saved);
-  };
-  const pickDir = async () => {
-    if (!supportsDirectoryPicker()) return;
-    try {
-      const dir = await pickDirectoryHandle();
-      if (!dir) return;
-      const saved = await storeDirectoryHandle(dir);
-      setHandleSaved(saved);
-      const found = await lookupLocalFile(yt.v, lesson.title);
-      setLocal(found);
-      if (found.status === "need-file") setLocalNote("这个文件夹里没有和本节标题或编号相符的视频。可以改选一个文件，或改用在线。");
-      else if (!saved) setLocalNote("这次没能记住文件夹。刷新后需要再选。文件不会上传。");
-      else setLocalNote("");
-      if (found.status === "ready") {
-        saveChoice(yt.v, "local");
-        setSource("local");
-      }
-    } catch {
-      setLocalNote("没有打开文件夹。可以改选一个文件，或改用在线。");
-    }
-  };
-  const reauth = async () => {
-    if (local.status !== "need-permission") return;
-    const ok = await requestHandlePermission(local.handle);
-    if (!ok) {
-      setLocalNote("没有获得读取权限。可以改选文件，或改用在线。");
-      void pickFile();
-      return;
-    }
-    const found = await lookupLocalFile(yt.v, lesson.title);
-    setLocal(found);
-    setHandleSaved(true);
-    if (found.status === "ready") {
-      saveChoice(yt.v, "local");
-      setSource("local");
-      setLocalNote("");
-      return;
-    }
-    setLocalNote(found.status === "need-file" ? "已授权，但里面没有对上这节课的视频。" : "");
-    void pickFile();
-  };
-  const localReady = local.status === "ready";
-  const playDisabled = source === "online" ? phase === "embed" || phase === "missing" || phase === "error" : !localReady || phase === "error";
+  const playDisabled = playingCache ? phase === "error" : phase === "embed" || phase === "missing" || phase === "error";
 
   const at = times[cur];
   const last = Math.max(0, doc.sentences.length - 1);
@@ -507,83 +436,14 @@ export function VideoStudy({
             </a>
           </p>
         </header>
-        {source === "online" ? (
-          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} onUseLocal={chooseLocal} />
-        ) : local.status === "ready" ? (
-          <LocalPlayer key={`${local.file.name}:${local.file.size}`} ref={player} file={local.file} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} />
+        {playingCache ? (
+          <LocalPlayer key={readyUrl} ref={player} src={readyUrl} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} />
         ) : (
-          <div className="vs-frame vs-pick" data-testid="vs-pick">
-            {local.status === "checking" && <p>正在查看本机是否已经选过这节课的视频…</p>}
-            {local.status === "need-permission" && (
-              <>
-                <p>要重新允许读取你之前选过的{local.handle.kind === "directory" ? "文件夹" : "文件"}。网页不会自己打开「下载」文件夹。</p>
-                <button type="button" onClick={() => void reauth()} data-testid="vs-reauth">
-                  重新授权
-                </button>
-              </>
-            )}
-            {local.status === "need-file" && (
-              <>
-                <p>还没有这节课的本地视频。请选择已经下载的文件，或一个文件夹。本站不会上传，也不会自动读取「下载」文件夹。</p>
-                <button type="button" onClick={() => void pickFile()} data-testid="vs-pick-file">
-                  选择视频文件
-                </button>
-                {supportsDirectoryPicker() && (
-                  <button type="button" onClick={() => void pickDir()} data-testid="vs-pick-dir">
-                    选择文件夹
-                  </button>
-                )}
-              </>
-            )}
-            <button type="button" className="vs-pick-online" onClick={() => switchSource("online")} data-testid="vs-use-online">
-              改用在线播放
-            </button>
-            <p className="vs-pick-note">
-              {supportsDirectoryPicker()
-                ? "允许后可以记住文件位置，下次可能还要点一次授权。"
-                : "Safari 和 iPad 刷新后需要再选一次。文件只在这次打开期间播放。"}
-            </p>
-            {localNote && (
-              <p data-testid="vs-local-note">{localNote}</p>
-            )}
-          </div>
+          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} onUseLocal={chooseLocal} />
         )}
-        {source === "local" && local.status === "ready" && (
-          <p className="vs-local-name" data-testid="vs-local-name">
-            本地 · {local.file.name}
-            {handleSaved ? "" : " · 刷新后需要再选"}
-            <button type="button" onClick={() => void pickFile()}>
-              更换
-            </button>
-          </p>
-        )}
-        {source === "local" && local.status === "ready" && localNote && (
-          <p className="vs-pick-note" data-testid="vs-local-note">
-            {localNote}
-          </p>
-        )}
-        {asked && source === "online" && local.status !== "ready" && (
-          <p className="vs-pick-note" data-testid="vs-local-offer">
-            {localNote || "还没有这节课的本地文件，当前仍是在线。"}
-            {supportsDirectoryPicker() && (
-              <button type="button" onClick={() => void pickDir()} data-testid="vs-pick-dir">
-                选择文件夹
-              </button>
-            )}
-          </p>
-        )}
-        <input
-          ref={fileRef}
-          className="vs-file"
-          type="file"
-          accept="video/mp4,video/webm,video/quicktime,.mkv,.m4v,video/*"
-          multiple
-          data-testid="vs-file"
-          onChange={(e) => {
-            onPicked(e.target.files);
-            e.target.value = "";
-          }}
-        />
+        <p className={playingCache ? "vs-local-name" : "vs-pick-note"} data-testid={playingCache ? "vs-local-name" : "vs-cache-status"}>
+          {playingCache ? "本地 · 已缓存的整段" : cacheStatusLine(job, false)}
+        </p>
         {lines[cur] && (
           <div className="vs-now" data-testid="vs-now" data-sid={cur}>
             <SentRow
@@ -628,8 +488,9 @@ export function VideoStudy({
             <button
               type="button"
               role="tab"
-              aria-selected={source === "local" && local.status === "ready"}
-              className={source === "local" && local.status === "ready" ? "is-on" : ""}
+              aria-selected={playingCache}
+              aria-label="已缓存的整段视频"
+              className={playingCache ? "is-on" : ""}
               onClick={chooseLocal}
               data-testid="vs-source-local"
             >
@@ -638,8 +499,8 @@ export function VideoStudy({
             <button
               type="button"
               role="tab"
-              aria-selected={source === "online"}
-              className={source === "online" ? "is-on" : ""}
+              aria-selected={!playingCache}
+              className={!playingCache ? "is-on" : ""}
               onClick={() => switchSource("online")}
               data-testid="vs-source-online"
             >

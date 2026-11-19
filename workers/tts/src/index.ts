@@ -1,5 +1,6 @@
 import { handleCaptions } from "./captions";
 import { handleExpress } from "./express";
+import { handleFullCache } from "./fullCache";
 
 /**
  * musk-atlas-tts — tiny proxy for xAI text-to-speech (stock preset voice only; no cloning).
@@ -18,6 +19,10 @@ interface Env {
   XAI_CHAT_MODEL?: string;
   /** New expression-model calls per UTC day. Cache hits are free. */
   EXPRESS_DAILY?: string;
+  /** New full-video cache jobs per UTC day. The number enforced in code is 6. */
+  FULL_DAILY?: string;
+  /** Shared with the parent-run downloader. Not sent to the browser. */
+  CACHE_JOB_SECRET?: string;
 }
 
 const ORIGINS = new Set([
@@ -28,6 +33,34 @@ const ORIGINS = new Set([
   "http://127.0.0.1:5189",
 ]);
 const MAX_CHARS = 600;
+
+function asJobBucket(bucket: R2Bucket) {
+  return {
+    async get(key: string) {
+      const obj = await bucket.get(key);
+      if (!obj) return null;
+      return { size: obj.size, text: () => obj.text() };
+    },
+    async head(key: string) {
+      const obj = await bucket.head(key);
+      return obj ? { size: obj.size } : null;
+    },
+    async put(key: string, value: string, opts?: { httpMetadata?: { contentType?: string; cacheControl?: string } }) {
+      await bucket.put(key, value, opts);
+    },
+    async list(prefix: string) {
+      const out: string[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 5; page++) {
+        const listed = await bucket.list({ prefix, limit: 100, cursor });
+        for (const obj of listed.objects) out.push(obj.key);
+        if (!listed.truncated) break;
+        cursor = listed.cursor;
+      }
+      return out;
+    },
+  };
+}
 
 const cors = (origin: string) => ({
   "Access-Control-Allow-Origin": origin,
@@ -45,11 +78,15 @@ async function sha256(s: string) {
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
+    const url = new URL(req.url);
+    if (url.pathname === "/full/claim" || url.pathname === "/full/result") {
+      return handleFullCache(req, asJobBucket(env.BUCKET), {}, { secret: env.CACHE_JOB_SECRET ?? "", now: Date.now() });
+    }
     const origin = req.headers.get("Origin") ?? "";
     if (!ORIGINS.has(origin)) return new Response("forbidden", { status: 403 });
     const h = cors(origin);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: h });
-    const url = new URL(req.url);
+    if (url.pathname.startsWith("/full/")) return handleFullCache(req, asJobBucket(env.BUCKET), h, { secret: env.CACHE_JOB_SECRET ?? "", now: Date.now() });
     if (url.pathname === "/captions" && req.method === "GET") return handleCaptions(url, env, h);
     if (url.pathname === "/express") {
       if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: h });

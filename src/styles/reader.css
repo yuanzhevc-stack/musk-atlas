@@ -1531,13 +1531,6 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
 }
 .vs-local-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .vs-local-name button { color: #f4f1ea; background: transparent; }
-.vs-file {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
 .vs-overlay {
   position: absolute;
   inset: 0;

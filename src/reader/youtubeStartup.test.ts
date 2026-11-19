@@ -18,7 +18,8 @@ test("a late ready or timeout cannot overwrite a failure or a started player", (
 test("startup copy does not blame the network and stays bounded", () => {
   assert.equal(YOUTUBE_STARTUP_MESSAGE.includes("网络"), false);
   assert.equal(YOUTUBE_STARTUP_MESSAGE.includes("重试"), true);
-  assert.equal(YOUTUBE_STARTUP_MESSAGE.includes("本机"), true);
+  assert.equal(YOUTUBE_STARTUP_MESSAGE.includes("缓存"), true);
+  assert.equal(YOUTUBE_STARTUP_MESSAGE.includes("选择本机"), false);
   assert.equal(YOUTUBE_STARTUP_MS <= 8000, true);
   assert.equal(YOUTUBE_STARTUP_MS >= 1000, true);
 });
