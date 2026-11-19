@@ -5,7 +5,8 @@ import type { Item, Lesson, Token } from "./model";
 import { phraseIndex } from "./model";
 import { translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
-import { cacheNote, initialSource, lessonCache, saveChoice, type SourceChoice } from "./hostedLesson";
+import { saveChoice, type SourceChoice } from "./hostedLesson";
+import { adoptReady, cacheStatusLine, enqueueFullCache, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, type CacheView } from "./fullCache";
 import { centerScroll, followAllowed, sentenceAt, shouldRecenter } from "./sync";
 import { YoutubePlayer, type PlayerHandle, type PlayerPhase } from "./YoutubePlayer";
 import { clockOf, watchUrl } from "./youtube";
@@ -143,8 +144,9 @@ export function VideoStudy({
   const [tr, setTr] = useState<Record<number, string>>({});
   const [hint, setHint] = useState("");
   const [held, setHeld] = useState(false);
-  const [source, setSource] = useState<SourceChoice>(() => initialSource(yt.v));
-  const [asked, setAsked] = useState(false);
+  const [source, setSource] = useState<SourceChoice>(() => openingSource(yt.v));
+  const started = useRef(source);
+  const [job, setJob] = useState<CacheView | null>(() => rememberedJob(yt.v));
   const [bootAt, setBootAt] = useState(() => times[cur] ?? 0);
   const clock = useRef(times[cur] ?? 0);
   const alignMode = useRef<"force" | "follow">("force");
@@ -376,7 +378,32 @@ export function VideoStudy({
     const i = sentenceAt(timesRef.current, t);
     setCur((c) => (c === i ? c : i));
   };
-  const cache = lessonCache(yt.v);
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  useEffect(() => {
+    let stop = false;
+    let posted = false;
+    const tick = async () => {
+      if (!posted) {
+        posted = true;
+        await enqueueFullCache(yt.v);
+      }
+      const next = await readFullCache(yt.v);
+      if (stop) return;
+      setJob(next);
+      const now = phaseRef.current;
+      const phaseKind = now === "loading" || now === "playing" || now === "paused" ? now : "other";
+      if (adoptReady(started.current, phaseKind, next.verified) === "online") setSource("online");
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 10_000);
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
+  }, [yt.v]);
+  const readyUrl = (job?.verified ? job.url : rememberedReady(yt.v)?.url) ?? "";
+  const playingCache = source === "local" && readyUrl === fullMediaUrl(yt.v);
   const switchSource = (next: SourceChoice) => {
     const reported = player.current?.getTime();
     const t = typeof reported === "number" && reported >= 0.4 ? reported : clock.current;
@@ -386,14 +413,11 @@ export function VideoStudy({
     setSource(next);
   };
   const chooseLocal = () => {
-    if (cache.kind === "full") {
+    if (playingCache || job?.verified) {
       switchSource("local");
-      setAsked(false);
       return;
     }
-    setAsked(true);
   };
-  const playingCache = source === "local" && cache.kind === "full";
   const playDisabled = playingCache ? phase === "error" : phase === "embed" || phase === "missing" || phase === "error";
 
   const at = times[cur];
@@ -412,21 +436,14 @@ export function VideoStudy({
             </a>
           </p>
         </header>
-        {playingCache && cache.kind === "full" ? (
-          <LocalPlayer key={cache.url} ref={player} src={cache.url} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} />
+        {playingCache ? (
+          <LocalPlayer key={readyUrl} ref={player} src={readyUrl} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} />
         ) : (
           <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} onUseLocal={chooseLocal} />
         )}
-        {playingCache && (
-          <p className="vs-local-name" data-testid="vs-local-name">
-            本地 · 已缓存的整段
-          </p>
-        )}
-        {asked && !playingCache && (
-          <p className="vs-pick-note" data-testid="vs-local-offer">
-            {cacheNote(cache.kind)}
-          </p>
-        )}
+        <p className={playingCache ? "vs-local-name" : "vs-pick-note"} data-testid={playingCache ? "vs-local-name" : "vs-cache-status"}>
+          {playingCache ? "本地 · 已缓存的整段" : cacheStatusLine(job, false)}
+        </p>
         {lines[cur] && (
           <div className="vs-now" data-testid="vs-now" data-sid={cur}>
             <SentRow
