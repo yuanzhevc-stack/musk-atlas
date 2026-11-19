@@ -5,7 +5,7 @@ import type { Item, Lesson, Token } from "./model";
 import { phraseIndex } from "./model";
 import { translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
-import { explicitFiles, lookupLocalFile, pickDirectoryHandle, pickFileHandles, readChoice, requestHandlePermission, saveChoice, storeDirectoryHandle, storeFileHandle, supportsDirectoryPicker, type LocalLookup, type SourceChoice } from "./localVideo";
+import { explicitFiles, lookupLocalFile, pickDirectoryHandle, pickFileHandles, readChoice, requestHandlePermission, saveChoice, sessionFile, storeDirectoryHandle, storeFileHandle, supportsDirectoryPicker, type LocalLookup, type SourceChoice } from "./localVideo";
 import { centerScroll, followAllowed, sentenceAt, shouldRecenter } from "./sync";
 import { YoutubePlayer, type PlayerHandle, type PlayerPhase } from "./YoutubePlayer";
 import { clockOf, watchUrl } from "./youtube";
@@ -143,9 +143,10 @@ export function VideoStudy({
   const [tr, setTr] = useState<Record<number, string>>({});
   const [hint, setHint] = useState("");
   const [held, setHeld] = useState(false);
-  const [source, setSource] = useState<SourceChoice>(() => (readChoice(yt.v) === "online" ? "online" : "local"));
+  const [source, setSource] = useState<SourceChoice>(() => (sessionFile(yt.v) && readChoice(yt.v) !== "online" ? "local" : "online"));
   const [local, setLocal] = useState<LocalLookup | { status: "checking" }>({ status: "checking" });
   const [localNote, setLocalNote] = useState("");
+  const [asked, setAsked] = useState(false);
   const [handleSaved, setHandleSaved] = useState(true);
   const [bootAt, setBootAt] = useState(() => times[cur] ?? 0);
   const clock = useRef(times[cur] ?? 0);
@@ -386,6 +387,7 @@ export function VideoStudy({
       if (!live) return;
       setLocal(found);
       setHandleSaved(found.status === "ready" ? found.remembered : true);
+      if (found.status === "ready" && readChoice(yt.v) !== "online") setSource("local");
     });
     return () => {
       live = false;
@@ -398,6 +400,21 @@ export function VideoStudy({
     saveChoice(yt.v, next);
     setPhase(next === "online" ? "loading" : "paused");
     setSource(next);
+  };
+  const chooseLocal = () => {
+    if (local.status === "ready") {
+      switchSource("local");
+      return;
+    }
+    const reported = player.current?.getTime();
+    const t = typeof reported === "number" && reported >= 0.4 ? reported : clock.current;
+    setBootAt(Number.isFinite(t) ? t : (times[cur] ?? 0));
+    setAsked(true);
+    if (local.status === "need-permission") {
+      void reauth();
+      return;
+    }
+    void pickFile();
   };
   const takeFile = (file: File, loose: boolean, saved: boolean) => {
     setLocal({ status: "ready", file, remembered: saved });
@@ -443,7 +460,10 @@ export function VideoStudy({
       if (found.status === "need-file") setLocalNote("这个文件夹里没有和本节标题或编号相符的视频。可以改选一个文件，或改用在线。");
       else if (!saved) setLocalNote("这次没能记住文件夹。刷新后需要再选。文件不会上传。");
       else setLocalNote("");
-      if (found.status === "ready") saveChoice(yt.v, "local");
+      if (found.status === "ready") {
+        saveChoice(yt.v, "local");
+        setSource("local");
+      }
     } catch {
       setLocalNote("没有打开文件夹。可以改选一个文件，或改用在线。");
     }
@@ -453,12 +473,20 @@ export function VideoStudy({
     const ok = await requestHandlePermission(local.handle);
     if (!ok) {
       setLocalNote("没有获得读取权限。可以改选文件，或改用在线。");
+      void pickFile();
       return;
     }
     const found = await lookupLocalFile(yt.v, lesson.title);
     setLocal(found);
     setHandleSaved(true);
+    if (found.status === "ready") {
+      saveChoice(yt.v, "local");
+      setSource("local");
+      setLocalNote("");
+      return;
+    }
     setLocalNote(found.status === "need-file" ? "已授权，但里面没有对上这节课的视频。" : "");
+    void pickFile();
   };
   const localReady = local.status === "ready";
   const playDisabled = source === "online" ? phase === "embed" || phase === "missing" || phase === "error" : !localReady || phase === "error";
@@ -479,16 +507,8 @@ export function VideoStudy({
             </a>
           </p>
         </header>
-        <div className="vs-source" role="tablist" aria-label="视频来源">
-          <button type="button" role="tab" aria-selected={source === "local"} className={source === "local" ? "is-on" : ""} onClick={() => switchSource("local")} data-testid="vs-source-local">
-            本地
-          </button>
-          <button type="button" role="tab" aria-selected={source === "online"} className={source === "online" ? "is-on" : ""} onClick={() => switchSource("online")} data-testid="vs-source-online">
-            在线
-          </button>
-        </div>
         {source === "online" ? (
-          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} onUseLocal={() => switchSource("local")} />
+          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} onUseLocal={chooseLocal} />
         ) : local.status === "ready" ? (
           <LocalPlayer key={`${local.file.name}:${local.file.size}`} ref={player} file={local.file} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} />
         ) : (
@@ -540,6 +560,16 @@ export function VideoStudy({
         {source === "local" && local.status === "ready" && localNote && (
           <p className="vs-pick-note" data-testid="vs-local-note">
             {localNote}
+          </p>
+        )}
+        {asked && source === "online" && local.status !== "ready" && (
+          <p className="vs-pick-note" data-testid="vs-local-offer">
+            {localNote || "还没有这节课的本地文件，当前仍是在线。"}
+            {supportsDirectoryPicker() && (
+              <button type="button" onClick={() => void pickDir()} data-testid="vs-pick-dir">
+                选择文件夹
+              </button>
+            )}
           </p>
         )}
         <input
@@ -594,6 +624,28 @@ export function VideoStudy({
           <button type="button" className={showTr ? "is-on" : ""} onClick={() => setShowTr((s) => !s)} aria-pressed={showTr} aria-label={showTr ? "隐藏中译" : "显示中译"} data-testid="vs-tr-toggle">
             <Languages size={16} /> <span>{showTr ? "隐藏中译" : "中译"}</span>
           </button>
+          <div className="vs-source" role="tablist" aria-label="视频来源" data-testid="vs-source">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={source === "local" && local.status === "ready"}
+              className={source === "local" && local.status === "ready" ? "is-on" : ""}
+              onClick={chooseLocal}
+              data-testid="vs-source-local"
+            >
+              本地
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={source === "online"}
+              className={source === "online" ? "is-on" : ""}
+              onClick={() => switchSource("online")}
+              data-testid="vs-source-online"
+            >
+              在线
+            </button>
+          </div>
           <span className="vs-count">
             {cur + 1} / {doc.sentences.length}
           </span>
