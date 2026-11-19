@@ -1464,12 +1464,79 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
   background: #000;
 }
 .vs-frame iframe,
+.vs-frame video,
 .vs-yt-host {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   border: 0;
+  background: #000;
+}
+.vs-bar .vs-source {
+  display: inline-flex;
+  flex: 0 0 auto;
+  max-width: 100%;
+  margin: 0;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(28, 36, 48, 0.08);
+  border: 0.5px solid rgba(28, 36, 48, 0.14);
+}
+.vs-bar .vs-source button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #1c2430;
+  font-size: 13px;
+  font-weight: 600;
+}
+.vs-bar .vs-source button.is-on {
+  background: #16382c;
+  color: #f4f1ea;
+}
+.vs-pick {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 18px;
+  text-align: center;
+  color: #f4f1ea;
+  background: #10241c;
+}
+.vs-pick p { margin: 0; max-width: 36em; font-size: 14px; line-height: 1.45; }
+.vs-pick button,
+.vs-local-name button {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 0.5px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-weight: 600;
+}
+.vs-pick-note, .vs-local-name { margin: 8px 4px 0; font-size: 12px; color: rgba(244, 241, 234, 0.72); }
+.vs-pick-note button {
+  margin-left: 8px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 0.5px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-weight: 600;
+}
+.vs-local-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.vs-local-name button { color: #f4f1ea; background: transparent; }
+.vs-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 .vs-overlay {
   position: absolute;
@@ -1487,7 +1554,8 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
   line-height: 1.45;
 }
 .vs-overlay p { margin: 0; max-width: 28em; }
-.vs-overlay-quiet { pointer-events: none; background: color-mix(in oklab, #10241c 55%, transparent); }
+.vs-overlay-quiet { background: color-mix(in oklab, #10241c 78%, transparent); }
+.vs-overlay-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .vs-overlay button,
 .vs-overlay a,
 .musk-noclip a {
@@ -1639,8 +1707,9 @@ a.td-stat:hover { border-color: color-mix(in oklab, var(--rd-blue-ink) 40%, tran
 @media (max-width: 899px) {
   .vs-stage { position: static; }
   .vs-subs { height: auto; overflow: visible; }
-  .vs-bar button span { display: none; }
-  .vs-bar button { padding: 0 10px; }
+  .vs-bar > button span { display: none; }
+  .vs-bar > button { padding: 0 10px; }
+  .vs-bar .vs-source button { padding: 0 10px; }
   .vs-count { margin-left: 0; }
 }
 @media (min-width: 960px) {
