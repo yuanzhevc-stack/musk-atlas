@@ -121,6 +121,7 @@ export function loopDecision(input: LoopInput): LoopDecision {
     return { type: "none" };
   }
   if (input.time < input.end - 0.12) return { type: "none" };
+  if (!input.pauseAfter && input.intervalSec <= 0) return { type: "restart", at: input.start };
   return { type: "hold" };
 }
 

@@ -28,6 +28,7 @@ test("cloze blanks are stable and skip function words", () => {
 
 test("a sentence loop holds at the end and restarts after the interval", () => {
   assert.deepEqual(loopDecision({ time: 3, start: 1, end: 5, enabled: true, pauseAfter: false, intervalSec: 2, holding: false, heldForSec: 0 }), { type: "none" });
+  assert.deepEqual(loopDecision({ time: 5, start: 1, end: 5, enabled: true, pauseAfter: false, intervalSec: 0, holding: false, heldForSec: 0 }), { type: "restart", at: 1 });
   assert.deepEqual(loopDecision({ time: 5, start: 1, end: 5, enabled: true, pauseAfter: false, intervalSec: 2, holding: false, heldForSec: 0 }), { type: "hold" });
   assert.deepEqual(loopDecision({ time: 5, start: 1, end: 5, enabled: true, pauseAfter: false, intervalSec: 2, holding: true, heldForSec: 1 }), { type: "none" });
   assert.deepEqual(loopDecision({ time: 5, start: 1, end: 5, enabled: true, pauseAfter: false, intervalSec: 2, holding: true, heldForSec: 2 }), { type: "restart", at: 1 });
