@@ -75,8 +75,8 @@ export function openingSource(videoId: string): SourceChoice {
 }
 
 /** A visit that already started on YouTube stays there. The next open uses the cache. */
-export function adoptReady(started: SourceChoice, phase: "loading" | "playing" | "paused" | "other", ready: boolean): "online" | "stay" {
-  if (!ready && started === "local" && phase === "loading") return "online";
+export function adoptReady(started: SourceChoice, phase: "loading" | "playing" | "paused" | "other", ready: boolean, kept = false): "online" | "stay" {
+  if (!ready && !kept && started === "local" && phase === "loading") return "online";
   return "stay";
 }
 
@@ -159,7 +159,6 @@ export async function readFullCache(v: string, fetchImpl: typeof fetch = fetch):
     if (res.ok || res.status === 429) {
       const view = await readBody(res, v);
       rememberJob(view);
-      if (!view.verified) forgetReady(v);
       return view;
     }
   } catch {
@@ -171,7 +170,6 @@ export async function readFullCache(v: string, fetchImpl: typeof fetch = fetch):
     const rec = (await pub.json()) as { bytes?: number; duration?: number; url?: string };
     const view = viewFrom({ v, status: "ready", runner: "configured", bytes: rec.bytes, duration: rec.duration, url: rec.url }, v);
     rememberJob(view);
-    if (!view.verified) forgetReady(v);
     return view;
   } catch {
     return rememberedJob(v) ?? { v, status: "unknown", runner: "unreachable", verified: false };

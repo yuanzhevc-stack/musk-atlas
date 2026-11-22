@@ -189,6 +189,14 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   const [video, setVideo] = useState<{ t: number; n: number } | null>(null);
   const [mode, setModeRaw] = useState<"sentence" | "page">(() => (localStorage.getItem(VIEW_KEY) === "page" ? "page" : "sentence"));
   const [study, setStudy] = useState<"video" | "read">(() => (!lesson.yt || localStorage.getItem(STUDY_KEY) === "read" ? "read" : "video"));
+  useEffect(() => {
+    const toRead = () => {
+      localStorage.setItem(STUDY_KEY, "read");
+      setStudy("read");
+    };
+    window.addEventListener("musk-atlas:study-read", toRead);
+    return () => window.removeEventListener("musk-atlas:study-read", toRead);
+  }, []);
   const [cur, setCur] = useState(() => {
     const n = doc.sentences.length;
     const want = focusSid ?? lesson.sid ?? doc.paragraphs[doc.pages[Math.max(0, startPage)]?.from ?? 0]?.tokens[0]?.sid ?? 0;

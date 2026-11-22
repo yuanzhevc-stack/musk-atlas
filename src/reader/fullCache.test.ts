@@ -39,6 +39,7 @@ test("a youtube visit keeps its player when the cache becomes ready", () => {
   assert.equal(adoptReady("online", "paused", true), "stay");
   assert.equal(adoptReady("online", "loading", true), "stay");
   assert.equal(adoptReady("local", "loading", false), "online");
+  assert.equal(adoptReady("local", "loading", false, true), "stay");
   assert.equal(adoptReady("local", "playing", false), "stay");
 });
 

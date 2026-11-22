@@ -27,8 +27,15 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
     seek(seconds: number) {
       const v = video.current;
       if (!v) return;
-      initialRef.current = seconds;
-      v.currentTime = Math.max(0, seconds);
+      const target = Math.max(0, seconds);
+      initialRef.current = target;
+      if (Math.abs((v.currentTime || 0) - target) < 0.08) {
+        if (v.paused) void v.play().catch(() => setPh("blocked"));
+        return;
+      }
+      const fast = (v as HTMLVideoElement & { fastSeek?: (t: number) => void }).fastSeek;
+      if (typeof fast === "function") fast.call(v, target);
+      else v.currentTime = target;
     },
     play() {
       video.current?.play().then(() => setPh("playing")).catch(() => setPh("blocked"));
