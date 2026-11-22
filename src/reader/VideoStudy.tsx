@@ -7,7 +7,7 @@ import { ecdict, translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
 import { saveChoice, type SourceChoice } from "./hostedLesson";
 import { adoptReady, cacheStatusLine, enqueueFullCache, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, type CacheView } from "./fullCache";
-import { DESK_MODES, MODE_LABEL, loopDecision, loopRange, nextSpeed, showsChinese, type DeskMode } from "./lessonDesk";
+import { DESK_MODES, MODE_LABEL, dragPhrase, loopDecision, loopRange, nextSpeed, rowDisclosure, selectedPhrase, showsChinese, type DeskMode, type RowDisclosure } from "./lessonDesk";
 import { LessonPractice } from "./LessonPractice";
 import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAudio";
 import { readNote, writeNote } from "./lessonNotes";
@@ -29,7 +29,7 @@ interface RowProps {
   timeLabel: string;
   showTr: boolean;
   tr: string;
-  conceal: boolean;
+  disclosure: RowDisclosure;
   itemsRef: RefObject<Record<string, Item>>;
   phraseRef: RefObject<Map<number, { from: number; to: number; key: string }>>;
   bus: RefObject<Bus>;
@@ -40,24 +40,52 @@ interface Bus {
   down: (i: number, e: PointerEvent) => void;
   enter: (i: number) => void;
   clickWord: (i: number, e: MouseEvent) => void;
+  consumed: () => boolean;
 }
 
 const SentRow = memo(
-  function SentRow({ sid, tokens, active, selFrom, selTo, timeLabel, showTr, tr, conceal, itemsRef, phraseRef, bus }: RowProps) {
+  function SentRow({ sid, tokens, active, selFrom, selTo, timeLabel, showTr, tr, disclosure, itemsRef, phraseRef, bus }: RowProps) {
+    const follow = (e: PointerEvent<HTMLElement>) => {
+      if (e.buttons !== 1 && e.type === "pointermove") return;
+      const hit = document.elementFromPoint(e.clientX, e.clientY);
+      const word = hit instanceof Element ? hit.closest<HTMLElement>("[data-ti]") : null;
+      if (!word) return;
+      bus.current?.enter(Number(word.dataset.ti));
+    };
     return (
-      <div className={`vs-sent ${active ? "is-on" : ""}`} role="listitem" data-vs={sid} aria-current={active ? "true" : undefined} data-testid="vs-sent">
+      <div className={`vs-sent ${active ? "is-on" : ""}`} role="listitem" data-vs={sid} aria-current={active ? "true" : undefined} data-testid="vs-sent" data-answer={disclosure}>
         <button type="button" className="vs-jump" onClick={() => bus.current?.jump(sid)} aria-label={`从第 ${sid + 1} 句播放`} data-testid="vs-jump">
           {timeLabel}
         </button>
         <div className="vs-copy">
         <div
-          className={`vs-line rd-text${conceal ? " is-concealed" : ""}`}
+          className="vs-line rd-text"
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            const word = (e.target as HTMLElement).closest<HTMLElement>("[data-ti]");
+            if (!word) return;
+            e.stopPropagation();
+            try {
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+            } catch {
+              /* the move handler still sees events that stay inside the line */
+            }
+            bus.current?.down(Number(word.dataset.ti), e);
+          }}
+          onPointerMove={follow}
           onClick={(e) => {
+            if (bus.current?.consumed()) {
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
             if ((e.target as HTMLElement).closest(".w")) return;
             bus.current?.jump(sid);
           }}
         >
-          {tokens.map((t) => {
+          {disclosure !== "full" ? (
+            <p className="desk-hidden">{disclosure === "answer-hidden" ? "这一句的答案先不放出来。" : "英文先不显示。"}</p>
+          ) : tokens.map((t) => {
             const ph = phraseRef.current?.get(t.i);
             const inSel = selFrom >= 0 && t.i >= selFrom && t.i <= selTo;
             if (!t.key)
@@ -73,8 +101,6 @@ const SentRow = memo(
                 data-ti={t.i}
                 data-testid="tok"
                 className={`w ${statusClass(it)}${ph ? " ph" : ""}${inSel ? " in-sel" : ""}${selFrom === t.i ? " sel-a" : ""}${selTo === t.i ? " sel-b" : ""}`}
-                onPointerDown={(e) => bus.current?.down(t.i, e)}
-                onPointerEnter={() => bus.current?.enter(t.i)}
                 onClick={(e) => bus.current?.clickWord(t.i, e)}
               >
                 {t.text}
@@ -82,8 +108,7 @@ const SentRow = memo(
             );
           })}
         </div>
-          {conceal && <p className="desk-hidden">这一句在听写里先隐藏。</p>}
-          {showTr && (
+          {disclosure !== "answer-hidden" && showTr && (
             <p className="vs-tr" data-testid="vs-tr">
               <small>机器翻译 · MyMemory 或 Google</small>
               {tr || "正在取译文…"}
@@ -102,7 +127,7 @@ const SentRow = memo(
     a.timeLabel === b.timeLabel &&
     a.showTr === b.showTr &&
     a.tr === b.tr &&
-    a.conceal === b.conceal &&
+    a.disclosure === b.disclosure &&
     a.tokens === b.tokens,
 );
 
@@ -256,54 +281,62 @@ export function VideoStudy({
     if (n < 0 || n >= lines.length) return;
     jump(n);
   };
+  const applyPhrase = (start: number, end: number) => {
+    const phrase = dragPhrase(start, end);
+    if (!phrase) return;
+    anchor.current = phrase.from;
+    setSel(phrase);
+  };
   const bus = useRef<Bus>({
     jump,
     down(i, e) {
       e.stopPropagation();
       picking.current = true;
-      if (e.pointerType === "mouse" && e.button === 0 && !e.shiftKey) drag.current = { start: i, moved: false };
+      if (e.button !== 0 || e.shiftKey) return;
+      drag.current = { start: i, moved: false };
     },
     enter(i) {
       const d = drag.current;
       if (!d || i === d.start) return;
       d.moved = true;
-      anchor.current = d.start;
-      setSel({ from: Math.min(d.start, i), to: Math.max(d.start, i) });
+      applyPhrase(d.start, i);
     },
     clickWord(i, e) {
       e.stopPropagation();
       e.preventDefault();
-      if (drag.current?.moved) return;
-      if (e.shiftKey && anchor.current != null) setSel({ from: Math.min(anchor.current, i), to: Math.max(anchor.current, i) });
+      if (drag.current?.moved || Date.now() - dragEnd.current < 400) return;
+      if (e.shiftKey && anchor.current != null) applyPhrase(anchor.current, i);
       else {
         anchor.current = i;
         setSel({ from: i, to: i });
       }
     },
+    consumed: () => drag.current?.moved === true || Date.now() - dragEnd.current < 400,
   });
   bus.current.jump = jump;
   bus.current.down = (i, e) => {
     e.stopPropagation();
     picking.current = true;
-    if (e.pointerType === "mouse" && e.button === 0 && !e.shiftKey) drag.current = { start: i, moved: false };
+    if (e.button !== 0 || e.shiftKey) return;
+    drag.current = { start: i, moved: false };
   };
   bus.current.enter = (i) => {
     const d = drag.current;
     if (!d || i === d.start) return;
     d.moved = true;
-    anchor.current = d.start;
-    setSel({ from: Math.min(d.start, i), to: Math.max(d.start, i) });
+    applyPhrase(d.start, i);
   };
   bus.current.clickWord = (i, e) => {
     e.stopPropagation();
     e.preventDefault();
-    if (drag.current?.moved) return;
-    if (e.shiftKey && anchor.current != null) setSel({ from: Math.min(anchor.current, i), to: Math.max(anchor.current, i) });
+    if (drag.current?.moved || Date.now() - dragEnd.current < 400) return;
+    if (e.shiftKey && anchor.current != null) applyPhrase(anchor.current, i);
     else {
       anchor.current = i;
       setSel({ from: i, to: i });
     }
   };
+  bus.current.consumed = () => drag.current?.moved === true || Date.now() - dragEnd.current < 400;
 
   useEffect(() => {
     const up = () => {
@@ -311,8 +344,27 @@ export function VideoStudy({
       picking.current = false;
       setTimeout(() => (drag.current = null), 0);
     };
+    const onSelect = () => {
+      const picked = document.getSelection();
+      if (!picked || picked.isCollapsed || picked.rangeCount === 0) return;
+      const node = picked.anchorNode instanceof Element ? picked.anchorNode : picked.anchorNode?.parentElement;
+      if (!node || node.closest("input, textarea")) return;
+      const line = node.closest(".vs-line");
+      if (!line) return;
+      const range = picked.getRangeAt(0);
+      const ids = [...line.querySelectorAll<HTMLElement>("[data-ti]")].filter((el) => range.intersectsNode(el)).map((el) => Number(el.dataset.ti));
+      const phrase = selectedPhrase(ids);
+      if (!phrase) return;
+      anchor.current = phrase.from;
+      dragEnd.current = Date.now();
+      setSel(phrase);
+    };
     window.addEventListener("pointerup", up);
-    return () => window.removeEventListener("pointerup", up);
+    document.addEventListener("selectionchange", onSelect);
+    return () => {
+      window.removeEventListener("pointerup", up);
+      document.removeEventListener("selectionchange", onSelect);
+    };
   }, []);
 
   useEffect(() => {
@@ -535,7 +587,6 @@ export function VideoStudy({
   const q = query.trim().toLowerCase();
   const visible = q ? lines.filter((line) => line.text.toLowerCase().includes(q) || (tr[line.sid] ?? "").toLowerCase().includes(q)) : lines;
   const practice = mode === "dictation" || mode === "cloze" || mode === "zh2en" || mode === "cards";
-  const concealCurrent = mode === "dictation" && !revealed;
   const showZh = showsChinese(mode);
   const stageRef = useRef<HTMLDivElement>(null);
   const recorder = useRef<MediaRecorder | null>(null);
@@ -591,7 +642,7 @@ export function VideoStudy({
   };
   const row = (line: (typeof lines)[number], inTranscript: boolean) => {
     const hit = !!sel && line.tokens.length > 0 && sel.to >= line.tokens[0].i && sel.from <= line.tokens[line.tokens.length - 1].i;
-    const conceal = line.sid === cur && concealCurrent;
+    const disclosure = rowDisclosure(mode, revealed, line.sid === cur, inTranscript);
     return (
       <div key={line.sid} className="desk-row">
         {inTranscript && <span className="desk-num">{line.sid + 1}</span>}
@@ -603,9 +654,9 @@ export function VideoStudy({
           selTo={hit && sel ? sel.to : -1}
           stamp={stampOf(line.tokens, items, phraseAt)}
           timeLabel={times[line.sid] != null ? clockOf(times[line.sid]) : "–"}
-          showTr={showZh && !(line.sid === cur && mode === "zh2en" && !revealed)}
-          tr={tr[line.sid] ?? (showZh ? "正在取译文…" : "")}
-          conceal={conceal || (mode === "zh" && inTranscript)}
+          showTr={showZh && disclosure !== "answer-hidden"}
+          tr={disclosure === "answer-hidden" ? "" : (tr[line.sid] ?? (showZh ? "正在取译文…" : ""))}
+          disclosure={disclosure}
           itemsRef={itemsRef}
           phraseRef={phraseRef}
           bus={bus}
