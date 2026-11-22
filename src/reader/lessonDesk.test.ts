@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkCloze, checkWords, clozePieces, dragPhrase, loopDecision, loopRange, nextSpeed, personalCards, rowDisclosure, selectedPhrase } from "./lessonDesk.ts";
+import { checkCloze, checkWords, clozePieces, dragPhrase, holdSentence, keptCaption, loopDecision, loopRange, nextSpeed, personalCards, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase } from "./lessonDesk.ts";
 
 test("dictation compares words and ignores punctuation", () => {
   const hit = checkWords("Now we go this way.", "now we go this way");
@@ -56,6 +56,27 @@ test("answer modes omit the sentence until reveal, then put it back", () => {
   assert.equal(rowDisclosure("dictation", false, false, true), "full");
   assert.equal(rowDisclosure("both", false, true, true), "full");
   assert.equal(rowDisclosure("zh", false, false, true), "english-hidden");
+});
+
+test("a sentence pauses at its end and the caption stays until follow is on", () => {
+  assert.deepEqual(holdSentence({ time: 25.4, start: 25.1, end: 26.4, loop: false, pauseAtEnd: true }), { type: "inside" });
+  assert.deepEqual(holdSentence({ time: 26.32, start: 25.1, end: 26.4, loop: false, pauseAtEnd: true }), { type: "pause" });
+  assert.deepEqual(holdSentence({ time: 26.5, start: 25.1, end: 26.4, loop: false, pauseAtEnd: true }), { type: "pause" });
+  assert.deepEqual(holdSentence({ time: 26.5, start: 25.1, end: 26.4, loop: true, pauseAtEnd: true }), { type: "restart", at: 25.1 });
+  assert.deepEqual(holdSentence({ time: 26.5, start: 25.1, end: 26.4, loop: false, pauseAtEnd: false }), { type: "follow" });
+  assert.equal(keptCaption(6, 7, false), 6);
+  assert.equal(keptCaption(6, 7, true), 7);
+  assert.equal(REPLAY_BLOCKED.includes("button"), true);
+  assert.equal(REPLAY_BLOCKED.includes("[data-ti]"), true);
+  assert.equal(REPLAY_BLOCKED.includes("input"), true);
+  assert.equal(REPLAY_BLOCKED.includes("textarea"), true);
+});
+
+test("a word press looks up, a drag does not seek, and empty row space may seek", () => {
+  assert.equal(rowPointer({ word: true, dragged: false }), "lookup");
+  assert.equal(rowPointer({ word: true, dragged: true }), "keep");
+  assert.equal(rowPointer({ word: false, dragged: true }), "keep");
+  assert.equal(rowPointer({ word: false, dragged: false }), "seek");
 });
 
 test("a drag across words is a phrase and a single press is not", () => {

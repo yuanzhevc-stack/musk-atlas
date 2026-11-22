@@ -8,7 +8,7 @@ import { ecdict, translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
 import { saveChoice, type SourceChoice } from "./hostedLesson";
 import { adoptReady, cacheStatusLine, enqueueFullCache, forgetReady, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, type CacheView } from "./fullCache";
-import { DESK_MODES, MODE_LABEL, dragPhrase, loopDecision, loopRange, nextSpeed, rowDisclosure, selectedPhrase, showsChinese, type DeskMode, type RowDisclosure } from "./lessonDesk";
+import { DESK_MODES, MODE_LABEL, dragPhrase, holdSentence, keptCaption, loopDecision, loopRange, nextSpeed, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, showsChinese, type DeskMode, type RowDisclosure } from "./lessonDesk";
 import { LessonPractice } from "./LessonPractice";
 import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAudio";
 import { readNote, writeNote } from "./lessonNotes";
@@ -66,10 +66,12 @@ const SentRow = memo(
             const word = (e.target as HTMLElement).closest<HTMLElement>("[data-ti]");
             if (!word) return;
             e.stopPropagation();
-            try {
-              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-            } catch {
-              /* the move handler still sees events that stay inside the line */
+            if (!e.shiftKey) {
+              try {
+                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              } catch {
+                /* the move handler still sees events that stay inside the line */
+              }
             }
             bus.current?.down(Number(word.dataset.ti), e);
           }}
@@ -187,7 +189,7 @@ export function VideoStudy({
   const [loopOn, setLoopOn] = useState(false);
   const [pointA, setPointA] = useState<number | null>(null);
   const [intervalSec, setIntervalSec] = useState(0);
-  const [pauseAfter, setPauseAfter] = useState(false);
+  const [pauseAfter, setPauseAfter] = useState(true);
   const [revealed, setRevealed] = useState(false);
   const [noteFor, setNoteFor] = useState<number | null>(null);
   const [noteText, setNoteText] = useState("");
@@ -196,6 +198,7 @@ export function VideoStudy({
   const [ipaOn, setIpaOn] = useState(false);
   const [ipaLine, setIpaLine] = useState("");
   const loopHold = useRef<{ at: number } | null>(null);
+  const atEnd = useRef(false);
   const started = useRef(source);
   const [job, setJob] = useState<CacheView | null>(() => rememberedJob(yt.v));
   const [bootAt, setBootAt] = useState(() => times[cur] ?? 0);
@@ -256,6 +259,7 @@ export function VideoStudy({
     hold.current = Date.now() + 1200;
     alignMode.current = "force";
     heldRef.current = false;
+    atEnd.current = false;
     window.clearTimeout(holdTimer.current);
     setHeld(false);
     setSel(null);
@@ -273,6 +277,7 @@ export function VideoStudy({
     hold.current = Date.now() + 1200;
     alignMode.current = "force";
     heldRef.current = false;
+    atEnd.current = false;
     window.clearTimeout(holdTimer.current);
     setHeld(false);
     player.current?.seek(t);
@@ -343,7 +348,13 @@ export function VideoStudy({
 
   useEffect(() => {
     const up = () => {
-      if (drag.current?.moved) dragEnd.current = Date.now();
+      const gesture = drag.current;
+      const intent = rowPointer({ word: gesture != null, dragged: gesture?.moved === true });
+      if (intent === "lookup" && gesture) {
+        dragEnd.current = Date.now();
+        anchor.current = gesture.start;
+        setSel({ from: gesture.start, to: gesture.start });
+      } else if (intent === "keep") dragEnd.current = Date.now();
       picking.current = false;
       setTimeout(() => (drag.current = null), 0);
     };
@@ -498,19 +509,22 @@ export function VideoStudy({
 
   const onTime = (t: number) => {
     clock.current = t;
-    const span = loopOn
-      ? loopRange(timesRef.current, curRef.current, curRef.current)
-      : pointA == null
-        ? null
-        : loopRange(timesRef.current, pointA, Math.max(pointA, curRef.current));
-    if (span) {
+    const current = curRef.current;
+    const times = timesRef.current;
+    const looping = loopOn || pointA != null;
+    const span = looping
+      ? pointA != null && !loopOn
+        ? loopRange(times, pointA, Math.max(pointA, current))
+        : loopRange(times, current, current)
+      : loopRange(times, current, current);
+    if (looping && span) {
       const holding = loopHold.current != null;
       const decision = loopDecision({
         time: t,
         start: span.start,
         end: span.end,
         enabled: true,
-        pauseAfter,
+        pauseAfter: false,
         intervalSec,
         holding,
         heldForSec: holding ? (Date.now() - loopHold.current!.at) / 1000 : 0,
@@ -520,13 +534,24 @@ export function VideoStudy({
         player.current?.pause();
       } else if (decision.type === "restart") {
         loopHold.current = null;
+        atEnd.current = false;
         hold.current = Date.now() + 800;
         player.current?.seek(decision.at);
         player.current?.play();
       }
+    } else if (pauseAfter && span) {
+      const gate = holdSentence({ time: t, start: span.start, end: span.end, loop: false, pauseAtEnd: true });
+      if (gate.type === "pause") {
+        if (!atEnd.current) {
+          atEnd.current = true;
+          player.current?.pause();
+        }
+      } else if (t < span.end - 0.25) atEnd.current = false;
     }
     if (picking.current || Date.now() < hold.current) return;
-    const i = sentenceAt(timesRef.current, t);
+    const follow = !looping && !pauseAfter;
+    const i = keptCaption(current, sentenceAt(times, t), follow);
+    if (!follow) return;
     setCur((c) => (c === i ? c : i));
   };
   const phaseRef = useRef(phase);
@@ -716,24 +741,25 @@ export function VideoStudy({
         ) : (
           <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} onUseLocal={chooseLocal} rate={speed} />
         )}
+        {!hideVideo && <button type="button" className="desk-replay" aria-label="重播这一句" data-testid="desk-replay" onClick={replay} />}
         </div>
         <div className="desk-tools" role="group" aria-label="本句播放">
           <button type="button" onClick={() => setSpeed((n) => nextSpeed(n))} aria-label="播放速度" data-testid="desk-speed"><span className="desk-glyph">{speed === 1 ? "1×" : `${speed}×`}</span><span>倍速</span></button>
-          <button type="button" className={hideVideo ? "is-on" : ""} onClick={() => setHideVideo((v) => !v)} aria-pressed={hideVideo} aria-label={hideVideo ? "显示视频" : "隐藏视频"}>{hideVideo ? <Eye size={14} /> : <EyeOff size={14} />}<span>隐藏视频</span></button>
-          <button type="button" onClick={() => { const node = stageRef.current; if (!node) return; if (document.fullscreenElement) void document.exitFullscreen(); else void node.requestFullscreen?.(); }} aria-label="全屏"><Maximize size={14} /><span>全屏</span></button>
+          <button type="button" className={hideVideo ? "is-on" : ""} onClick={() => setHideVideo((v) => !v)} aria-pressed={hideVideo} aria-label={hideVideo ? "显示视频" : "隐藏视频"}>{hideVideo ? <Eye size={18} /> : <EyeOff size={18} />}<span>隐藏视频</span></button>
+          <button type="button" onClick={() => { const node = stageRef.current; if (!node) return; if (document.fullscreenElement) void document.exitFullscreen(); else void node.requestFullscreen?.(); }} aria-label="全屏"><Maximize size={18} /><span>全屏</span></button>
           <button type="button" className={ipaOn ? "is-on" : ""} aria-pressed={ipaOn} onClick={() => setIpaOn((v) => !v)} aria-label="音标" data-testid="desk-ipa"><span className="desk-glyph">A</span><span>音标</span></button>
-          <button type="button" onClick={() => step(-1)} disabled={cur <= 0} aria-label="上一句" data-testid="vs-prev"><SkipBack size={14} /><span>上一句</span></button>
-          <button type="button" className="desk-play" onClick={() => player.current?.toggle()} disabled={playDisabled} aria-label={phase === "playing" ? "暂停" : "播放"} data-testid="vs-play">{phase === "playing" ? <Pause size={14} /> : <Play size={14} />}<span>{phase === "playing" ? "暂停" : "播放"}</span></button>
-          <button type="button" onClick={() => step(1)} disabled={cur >= last} aria-label="下一句" data-testid="vs-next"><SkipForward size={14} /><span>下一句</span></button>
+          <button type="button" onClick={() => step(-1)} disabled={cur <= 0} aria-label="上一句" data-testid="vs-prev"><SkipBack size={18} /><span>上一句</span></button>
+          <button type="button" className="desk-play" onClick={() => { if (atEnd.current) replay(); else player.current?.toggle(); }} disabled={playDisabled} aria-label={phase === "playing" ? "暂停" : "播放"} data-testid="vs-play">{phase === "playing" ? <Pause size={18} /> : <Play size={18} />}<span>{phase === "playing" ? "暂停" : "播放"}</span></button>
+          <button type="button" onClick={() => step(1)} disabled={cur >= last} aria-label="下一句" data-testid="vs-next"><SkipForward size={18} /><span>下一句</span></button>
           <button type="button" className={pointA != null ? "is-on" : ""} aria-pressed={pointA != null} onClick={() => setPointA((a) => (a === cur ? null : cur))} aria-label="设置 A 点" data-testid="desk-a"><span className="desk-glyph">A</span><span>A点</span></button>
-          <button type="button" className={loopOn ? "is-on" : ""} aria-pressed={loopOn} onClick={() => setLoopOn((v) => !v)} aria-label="单句循环" data-testid="desk-loop"><Repeat size={14} /><span>单句循环</span></button>
+          <button type="button" className={loopOn ? "is-on" : ""} aria-pressed={loopOn} onClick={() => setLoopOn((v) => !v)} aria-label="单句循环" data-testid="desk-loop"><Repeat size={18} /><span>单句循环</span></button>
           <label className="desk-tool desk-interval">间隔
             <input type="number" min={0} max={15} step={1} value={intervalSec} onChange={(e) => setIntervalSec(Math.max(0, Math.min(15, Number(e.target.value) || 0)))} aria-label="循环间隔秒数" data-testid="desk-interval" />
           </label>
-          <button type="button" className={pauseAfter ? "is-on" : ""} aria-pressed={pauseAfter} onClick={() => setPauseAfter((v) => !v)} data-testid="desk-pause"><RotateCcw size={14} /><span>单句暂停</span></button>
+          <button type="button" className={pauseAfter ? "is-on" : ""} aria-pressed={pauseAfter} onClick={() => setPauseAfter((v) => !v)} data-testid="desk-pause"><RotateCcw size={18} /><span>单句暂停</span></button>
         </div>
         <p className="desk-cache" hidden data-testid={playingCache && phase !== "error" ? "vs-local-name" : "vs-cache-status"}>{cacheLine}</p>
-        <div className="desk-sheet">
+        <div className="desk-sheet" onClick={(e) => { if ((e.target as HTMLElement).closest(REPLAY_BLOCKED)) return; replay(); }}>
         {lines[cur] && mode !== "cards" && mode !== "cloze" && !(mode === "zh2en" && !revealed) && !(mode === "dictation" && !revealed) && (
           <div className="vs-now" data-testid="vs-now" data-sid={cur}>
             {row(lines[cur], false)}
