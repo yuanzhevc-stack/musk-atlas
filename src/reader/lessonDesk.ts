@@ -113,6 +113,25 @@ export interface LoopInput {
 
 export type LoopDecision = { type: "none" } | { type: "hold" } | { type: "restart"; at: number };
 
+export type SentenceGate = { type: "inside" } | { type: "pause" } | { type: "restart"; at: number } | { type: "follow" };
+
+/** Default study playback pauses at the sentence end and keeps that sentence. Loop repeats it. Follow is the opt-in continuous clock. */
+export function holdSentence(input: { time: number; start: number; end: number; loop: boolean; pauseAtEnd: boolean }): SentenceGate {
+  if (!Number.isFinite(input.time) || !Number.isFinite(input.start) || !Number.isFinite(input.end) || input.end <= input.start) return { type: "inside" };
+  if (input.time < input.end - 0.08) return { type: "inside" };
+  if (input.loop) return { type: "restart", at: input.start };
+  if (input.pauseAtEnd) return { type: "pause" };
+  return { type: "follow" };
+}
+
+/** While pause-at-end or loop is on, the caption stays put. Only continuous follow may adopt the clock's sentence. */
+export function keptCaption(current: number, clockIndex: number, follow: boolean): number {
+  return follow ? clockIndex : current;
+}
+
+/** Clicks on these controls keep their own job. A plain surface click replays the current sentence. */
+export const REPLAY_BLOCKED = "button, a, input, textarea, select, summary, label, audio, [data-ti], [role='tab']";
+
 export function loopDecision(input: LoopInput): LoopDecision {
   if (!input.enabled || !Number.isFinite(input.start) || !Number.isFinite(input.end) || input.end <= input.start) return { type: "none" };
   if (input.holding) {
@@ -172,6 +191,15 @@ export function rowDisclosure(mode: DeskMode, revealed: boolean, isCurrent: bool
   if (mode === "zh2en" && isCurrent && !revealed) return "english-hidden";
   if (mode === "zh" && inTranscript) return "english-hidden";
   return "full";
+}
+
+export type RowPointer = "lookup" | "seek" | "keep";
+
+/** A word press opens the lookup. A drag keeps that phrase and does not seek. Empty row space may seek. */
+export function rowPointer(input: { word: boolean; dragged: boolean }): RowPointer {
+  if (input.dragged) return "keep";
+  if (input.word) return "lookup";
+  return "seek";
 }
 
 /** A drag across two different word indexes. A press that stays on one word is a click, not a phrase. */

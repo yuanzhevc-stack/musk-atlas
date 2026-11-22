@@ -1,5 +1,6 @@
 import { ArrowLeft, BookOpen, Bookmark, Youtube, X as Close, Check, ChevronLeft, Languages, ChevronRight, ExternalLink, Pause, Play, Plus, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { go } from "../lib/router";
 import { speak, translate } from "../reader/dict";
 import { muskLookup } from "../reader/MuskSays";
@@ -824,6 +825,31 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
         )}
         </article>
 
+        {lesson.yt && study === "video"
+          ? sel && createPortal(
+            <aside className="rd-aside is-open rd-study-card" aria-label="词卡" data-testid="study-card">
+              <WordCard
+                key={selKey}
+                text={selText}
+                k={selKey!}
+                ctx={selCtx!}
+                phrase={phraseAt.get(sel.from)}
+                autoMusk={autoMusk}
+                canExtend={{ left: sel.from > 0, right: sel.to < all.length - 1 }}
+                onExtend={(d) => {
+                  const list = d > 0 ? all.slice(sel.to + 1) : all.slice(0, sel.from).reverse();
+                  const w = list.find(isWord);
+                  if (w) setSel(d > 0 ? { from: sel.from, to: w.i } : { from: w.i, to: sel.to });
+                }}
+                onPick={(r) => setSel(r)}
+                onStatus={setStatus}
+                onClose={() => setSel(null)}
+                best={best}
+              />
+            </aside>,
+            document.body,
+          )
+          : (
         <aside className={`rd-aside ${sel ? "is-open" : ""}`} aria-label="词卡">
           {sel && selKey ? (
             <WordCard
@@ -863,6 +889,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
             </div>
           )}
         </aside>
+          )}
       </div>
     </div>
   );
