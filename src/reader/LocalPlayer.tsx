@@ -8,7 +8,8 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
   initial: number;
   onTime?: (seconds: number) => void;
   onPhase?: (phase: PlayerPhase) => void;
-}>(function LocalPlayer({ src, title, initial, onTime, onPhase }, ref) {
+  rate?: number;
+}>(function LocalPlayer({ src, title, initial, onTime, onPhase, rate = 1 }, ref) {
   const video = useRef<HTMLVideoElement>(null);
   const onTimeRef = useRef(onTime);
   const onPhaseRef = useRef(onPhase);
@@ -45,6 +46,9 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
       const t = video.current?.currentTime;
       return typeof t === "number" && Number.isFinite(t) ? t : initialRef.current;
     },
+    setRate(next: number) {
+      if (video.current) video.current.playbackRate = next;
+    },
   }));
 
   useEffect(() => {
@@ -66,6 +70,10 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
       v.load();
     };
   }, [src]);
+
+  useEffect(() => {
+    if (video.current) video.current.playbackRate = rate;
+  }, [rate, src]);
 
   const emit = () => {
     const t = video.current?.currentTime;

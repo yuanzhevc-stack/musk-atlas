@@ -11,6 +11,7 @@ export interface PlayerHandle {
   pause: () => void;
   toggle: () => void;
   getTime: () => number;
+  setRate: (rate: number) => void;
 }
 
 interface YTPlayer {
@@ -19,6 +20,7 @@ interface YTPlayer {
   pauseVideo: () => void;
   getCurrentTime: () => number;
   getPlayerState: () => number;
+  setPlaybackRate?: (rate: number) => void;
   destroy: () => void;
 }
 
@@ -79,7 +81,8 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
   onPhase?: (phase: PlayerPhase) => void;
   /** Leave the embed and pick a downloaded file. Omitted where there is no lesson file. */
   onUseLocal?: () => void;
-}>(function YoutubePlayer({ videoId, title, initial, end, nonce = 0, onTime, onPhase, onUseLocal }, ref) {
+  rate?: number;
+}>(function YoutubePlayer({ videoId, title, initial, end, nonce = 0, onTime, onPhase, onUseLocal, rate = 1 }, ref) {
   const frame = useRef<HTMLDivElement>(null);
   const player = useRef<YTPlayer | null>(null);
   const initialRef = useRef(initial);
@@ -140,6 +143,13 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
         /* destroyed */
       }
       return initialRef.current;
+    },
+    setRate(next: number) {
+      try {
+        player.current?.setPlaybackRate?.(next);
+      } catch {
+        /* player not ready */
+      }
     },
   }));
 
@@ -282,6 +292,14 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
       /* not ready */
     }
   }, [nonce]);
+
+  useEffect(() => {
+    try {
+      player.current?.setPlaybackRate?.(rate);
+    } catch {
+      /* player not ready */
+    }
+  }, [rate, attempt]);
 
   const at = Math.max(0, initial);
   const outbound = watchUrl(videoId, at);

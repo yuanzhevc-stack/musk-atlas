@@ -1,15 +1,20 @@
 /** Video-first study: player and the lesson's own captions. Word taps reuse the reader card. */
-import { ExternalLink, Languages, Pause, Play, RotateCcw, SkipBack, SkipForward } from "lucide-react";
+import { BookMarked, BookOpen, Compass, Copy, ExternalLink, Eye, EyeOff, Gauge, Maximize, Mic, Pause, Play, Repeat, RotateCcw, Search, SkipBack, SkipForward, StickyNote, Star } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type RefObject } from "react";
 import type { Item, Lesson, Token } from "./model";
-import { phraseIndex } from "./model";
-import { translate } from "./dict";
+import { normalize, phraseIndex, reader } from "./model";
+import { ecdict, translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
 import { saveChoice, type SourceChoice } from "./hostedLesson";
 import { adoptReady, cacheStatusLine, enqueueFullCache, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, type CacheView } from "./fullCache";
-import { centerScroll, followAllowed, sentenceAt, shouldRecenter } from "./sync";
+import { DESK_MODES, MODE_LABEL, loopDecision, loopRange, nextSpeed, showsChinese, type DeskMode } from "./lessonDesk";
+import { LessonPractice } from "./LessonPractice";
+import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAudio";
+import { readNote, writeNote } from "./lessonNotes";
+import { centerScroll, followAllowed, lessonMedia, sentenceAt, shouldRecenter } from "./sync";
 import { YoutubePlayer, type PlayerHandle, type PlayerPhase } from "./YoutubePlayer";
 import { clockOf, watchUrl } from "./youtube";
+import { toast } from "../ui/Toast";
 
 type Sel = { from: number; to: number };
 const statusClass = (it?: Item) => (!it ? "s-new" : it.status === 5 ? "s-known" : it.status === -1 ? "s-ign" : `s-${it.status}`);
@@ -24,6 +29,7 @@ interface RowProps {
   timeLabel: string;
   showTr: boolean;
   tr: string;
+  conceal: boolean;
   itemsRef: RefObject<Record<string, Item>>;
   phraseRef: RefObject<Map<number, { from: number; to: number; key: string }>>;
   bus: RefObject<Bus>;
@@ -37,7 +43,7 @@ interface Bus {
 }
 
 const SentRow = memo(
-  function SentRow({ sid, tokens, active, selFrom, selTo, timeLabel, showTr, tr, itemsRef, phraseRef, bus }: RowProps) {
+  function SentRow({ sid, tokens, active, selFrom, selTo, timeLabel, showTr, tr, conceal, itemsRef, phraseRef, bus }: RowProps) {
     return (
       <div className={`vs-sent ${active ? "is-on" : ""}`} role="listitem" data-vs={sid} aria-current={active ? "true" : undefined} data-testid="vs-sent">
         <button type="button" className="vs-jump" onClick={() => bus.current?.jump(sid)} aria-label={`从第 ${sid + 1} 句播放`} data-testid="vs-jump">
@@ -45,7 +51,7 @@ const SentRow = memo(
         </button>
         <div className="vs-copy">
         <div
-          className="vs-line rd-text"
+          className={`vs-line rd-text${conceal ? " is-concealed" : ""}`}
           onClick={(e) => {
             if ((e.target as HTMLElement).closest(".w")) return;
             bus.current?.jump(sid);
@@ -76,7 +82,8 @@ const SentRow = memo(
             );
           })}
         </div>
-          {active && showTr && (
+          {conceal && <p className="desk-hidden">这一句在听写里先隐藏。</p>}
+          {showTr && (
             <p className="vs-tr" data-testid="vs-tr">
               <small>机器翻译 · MyMemory 或 Google</small>
               {tr || "正在取译文…"}
@@ -95,6 +102,7 @@ const SentRow = memo(
     a.timeLabel === b.timeLabel &&
     a.showTr === b.showTr &&
     a.tr === b.tr &&
+    a.conceal === b.conceal &&
     a.tokens === b.tokens,
 );
 
@@ -140,11 +148,26 @@ export function VideoStudy({
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const [phase, setPhase] = useState<PlayerPhase>("loading");
-  const [showTr, setShowTr] = useState(false);
   const [tr, setTr] = useState<Record<number, string>>({});
   const [hint, setHint] = useState("");
   const [held, setHeld] = useState(false);
   const [source, setSource] = useState<SourceChoice>(() => openingSource(yt.v));
+  const [mode, setMode] = useState<DeskMode>("both");
+  const [query, setQuery] = useState("");
+  const [hideVideo, setHideVideo] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const [loopOn, setLoopOn] = useState(false);
+  const [pointA, setPointA] = useState<number | null>(null);
+  const [intervalSec, setIntervalSec] = useState(0);
+  const [pauseAfter, setPauseAfter] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+  const [noteFor, setNoteFor] = useState<number | null>(null);
+  const [noteText, setNoteText] = useState("");
+  const [recNote, setRecNote] = useState("");
+  const [clips, setClips] = useState<Record<number, string>>({});
+  const [ipaOn, setIpaOn] = useState(false);
+  const [ipaLine, setIpaLine] = useState("");
+  const loopHold = useRef<{ at: number } | null>(null);
   const started = useRef(source);
   const [job, setJob] = useState<CacheView | null>(() => rememberedJob(yt.v));
   const [bootAt, setBootAt] = useState(() => times[cur] ?? 0);
@@ -301,7 +324,7 @@ export function VideoStudy({
       if (e.key === "ArrowRight") step(1);
       else if (e.key === "ArrowLeft") step(-1);
       else if (e.key === "r") replay();
-      else if (e.key === "t") setShowTr((s) => !s);
+      else if (e.key === "t") setMode((m) => (m === "both" ? "en" : "both"));
       else if (e.key === " ") player.current?.toggle();
       else return;
       e.preventDefault();
@@ -311,7 +334,12 @@ export function VideoStudy({
   });
 
   useEffect(() => {
-    if (!showTr || tr[cur] != null) return;
+    setRevealed(false);
+    loopHold.current = null;
+  }, [cur, mode, loopOn, pointA]);
+
+  useEffect(() => {
+    if (!showsChinese(mode) || tr[cur] != null) return;
     let live = true;
     const at = cur;
     translate(doc.sentences[at] ?? "").then((text) => {
@@ -321,7 +349,48 @@ export function VideoStudy({
     return () => {
       live = false;
     };
-  }, [showTr, cur, doc.sentences, tr]);
+  }, [mode, cur, doc.sentences, tr]);
+
+  useEffect(() => {
+    if (!showsChinese(mode)) return;
+    let live = true;
+    const pending = lines
+      .map((line) => line.sid)
+      .filter((sid) => tr[sid] == null)
+      .sort((a, b) => Math.abs(a - cur) - Math.abs(b - cur))
+      .slice(0, 4);
+    if (!pending.length) return;
+    void (async () => {
+      for (const sid of pending) {
+        if (!live) return;
+        const text = await translate(doc.sentences[sid] ?? "");
+        if (!live) return;
+        setTr((m) => (m[sid] != null ? m : { ...m, [sid]: text ?? "没有取到译文。在线翻译没有返回，这里不会编造。" }));
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [mode, cur, lines, tr, doc.sentences]);
+
+  useEffect(() => {
+    if (!ipaOn) return;
+    let live = true;
+    const words = lines[cur]?.tokens.flatMap((token) => (token.key ? [token.key] : [])) ?? [];
+    void (async () => {
+      const parts: string[] = [];
+      for (const key of words.slice(0, 16)) {
+        const hits = await ecdict(key).catch(() => []);
+        const ipa = hits.find((hit) => hit.ipa)?.ipa;
+        if (ipa) parts.push(`${key} ${ipa}`);
+      }
+      if (!live) return;
+      setIpaLine(parts.length ? parts.join("  ·  ") : "词典里没有这一句的音标，这里不会编造。");
+    })();
+    return () => {
+      live = false;
+    };
+  }, [ipaOn, cur, lines]);
 
   const alignTo = (sid: number, mode: "force" | "follow") => {
     const list = listRef.current;
@@ -374,6 +443,33 @@ export function VideoStudy({
 
   const onTime = (t: number) => {
     clock.current = t;
+    const span = loopOn
+      ? loopRange(timesRef.current, curRef.current, curRef.current)
+      : pointA == null
+        ? null
+        : loopRange(timesRef.current, pointA, Math.max(pointA, curRef.current));
+    if (span) {
+      const holding = loopHold.current != null;
+      const decision = loopDecision({
+        time: t,
+        start: span.start,
+        end: span.end,
+        enabled: true,
+        pauseAfter,
+        intervalSec,
+        holding,
+        heldForSec: holding ? (Date.now() - loopHold.current!.at) / 1000 : 0,
+      });
+      if (decision.type === "hold" && !holding) {
+        loopHold.current = { at: Date.now() };
+        player.current?.pause();
+      } else if (decision.type === "restart") {
+        loopHold.current = null;
+        hold.current = Date.now() + 800;
+        player.current?.seek(decision.at);
+        player.current?.play();
+      }
+    }
     if (picking.current || Date.now() < hold.current) return;
     const i = sentenceAt(timesRef.current, t);
     setCur((c) => (c === i ? c : i));
@@ -420,130 +516,211 @@ export function VideoStudy({
   };
   const playDisabled = playingCache ? phase === "error" : phase === "embed" || phase === "missing" || phase === "error";
 
+  useEffect(() => {
+    player.current?.setRate(speed);
+  }, [speed, source, playingCache]);
+  useEffect(() => {
+    let live = true;
+    void loadClip(lesson.id, cur).then((url) => {
+      if (live && url) setClips((prev) => (prev[cur] ? prev : { ...prev, [cur]: url }));
+    });
+    return () => {
+      live = false;
+    };
+  }, [lesson.id, cur]);
+
   const at = times[cur];
   const last = Math.max(0, doc.sentences.length - 1);
-  return (
-    <div className="vs" data-testid="video-study">
-      <div className="vs-stage">
-        <header className="vs-head">
-          <h1>{lesson.title}</h1>
-          <p>
-            {yt.author ? `${yt.author} · ` : ""}
-            {yt.kind === "asr" ? "自动字幕" : "人工字幕"}
-            {" · "}
-            <a href={watchUrl(yt.v, at ?? 0)} target="_blank" rel="noreferrer">
-              在 YouTube 打开 {at != null ? clockOf(at) : ""} <ExternalLink size={12} />
-            </a>
-          </p>
-        </header>
-        {playingCache ? (
-          <LocalPlayer key={readyUrl} ref={player} src={readyUrl} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} />
-        ) : (
-          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} onUseLocal={chooseLocal} />
+  const lessonKeys = useMemo(() => new Set(all.flatMap((token) => (token.key ? [token.key] : []))), [all]);
+  const q = query.trim().toLowerCase();
+  const visible = q ? lines.filter((line) => line.text.toLowerCase().includes(q) || (tr[line.sid] ?? "").toLowerCase().includes(q)) : lines;
+  const practice = mode === "dictation" || mode === "cloze" || mode === "zh2en" || mode === "cards";
+  const concealCurrent = mode === "dictation" && !revealed;
+  const showZh = showsChinese(mode);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const copySentence = (text: string) => {
+    const done = () => toast("已复制这一句", "ok");
+    if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).then(done, () => toast("没有复制成功", "warn"));
+    else toast("这台浏览器不能复制", "warn");
+  };
+  const favoriteSentence = (sid: number, text: string) => {
+    const saved = reader.toggleSentence(text, { lesson: lesson.id, title: lesson.title, sid, sentence: text, media: lessonMedia(lesson.yt, sid) });
+    toast(saved ? "已收藏到语料库" : "已取消收藏", "ok");
+  };
+  const openNote = (sid: number, text: string) => {
+    setNoteFor(sid);
+    setNoteText(readNote(lesson.id, sid) || items[normalize(text)]?.notes || "");
+  };
+  const saveOpenNote = () => {
+    if (noteFor == null) return;
+    writeNote(lesson.id, noteFor, noteText);
+    const text = doc.sentences[noteFor] ?? "";
+    if (items[normalize(text)]?.kind === "sentence") reader.upsert(text, { notes: noteText.trim() });
+    toast("笔记已留在这台设备", "ok");
+  };
+  const recordSentence = async (sid: number) => {
+    if (recorder.current) {
+      recorder.current.stop();
+      return;
+    }
+    if (recorderSupport() !== "ready") {
+      setRecNote("这台浏览器不能录音。");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (event) => {
+        if (event.data.size) chunks.push(event.data);
+      };
+      rec.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        recorder.current = null;
+        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+        void saveClip(lesson.id, sid, blob).then((url) => setClips((prev) => ({ ...prev, [sid]: url })));
+        setRecNote("录音只保存在这台设备，没有上传。");
+      };
+      recorder.current = rec;
+      rec.start();
+      setRecNote("正在录音。再点一次麦克风结束。");
+    } catch (error) {
+      setRecNote(recordingError(error) === "denied" ? "没有获得麦克风权限，录音没有开始。" : "这台浏览器不能在这里录音。");
+    }
+  };
+  const row = (line: (typeof lines)[number], inTranscript: boolean) => {
+    const hit = !!sel && line.tokens.length > 0 && sel.to >= line.tokens[0].i && sel.from <= line.tokens[line.tokens.length - 1].i;
+    const conceal = line.sid === cur && concealCurrent;
+    return (
+      <div key={line.sid} className="desk-row">
+        {inTranscript && <span className="desk-num">{line.sid + 1}</span>}
+        <SentRow
+          sid={line.sid}
+          tokens={line.tokens}
+          active={line.sid === cur}
+          selFrom={hit && sel ? sel.from : -1}
+          selTo={hit && sel ? sel.to : -1}
+          stamp={stampOf(line.tokens, items, phraseAt)}
+          timeLabel={times[line.sid] != null ? clockOf(times[line.sid]) : "–"}
+          showTr={showZh && !(line.sid === cur && mode === "zh2en" && !revealed)}
+          tr={tr[line.sid] ?? (showZh ? "正在取译文…" : "")}
+          conceal={conceal || (mode === "zh" && inTranscript)}
+          itemsRef={itemsRef}
+          phraseRef={phraseRef}
+          bus={bus}
+        />
+        {inTranscript && (
+          <div className="desk-row-actions">
+            <button type="button" aria-label="复制这一句" onClick={() => copySentence(line.text)}><Copy size={14} /></button>
+            <button type="button" aria-label="收藏这一句" onClick={() => favoriteSentence(line.sid, line.text)}><Star size={14} /></button>
+            <button type="button" aria-label="给这一句写笔记" onClick={() => openNote(line.sid, line.text)}><StickyNote size={14} /></button>
+            <button type="button" aria-label="录下自己的声音" onClick={() => void recordSentence(line.sid)}><Mic size={14} /></button>
+            <button type="button" aria-label="播放这一句" onClick={() => jump(line.sid)}><Play size={14} /></button>
+            {clips[line.sid] && <audio src={clips[line.sid]} controls preload="none" data-testid="sentence-audio" />}
+          </div>
         )}
+      </div>
+    );
+  };
+  return (
+    <div className={`desk ${mode === "read" ? "is-read" : ""}`} data-testid="video-study">
+      <nav className="desk-rail" aria-label="学习导航">
+        <a href="#/reader" aria-label="课程"><BookOpen size={18} /></a>
+        <a href="#/corpus" aria-label="语料"><BookMarked size={18} /></a>
+        <a href="#/today" aria-label="今日"><Compass size={18} /></a>
+        <button type="button" aria-label="查词" onClick={() => window.dispatchEvent(new Event("musk-atlas:lookup"))}><Search size={18} /></button>
+      </nav>
+      <div className="desk-body">
+      <header className="desk-top">
+        <a className="desk-back" href="#/reader">返回</a>
+        <h1>{lesson.title}</h1>
+        <div className="desk-modes" role="tablist" aria-label="学习模式">
+          {DESK_MODES.map((id) => (
+            <button key={id} type="button" role="tab" aria-selected={mode === id} className={mode === id ? "is-on" : ""} onClick={() => setMode(id)} data-testid={id === "both" ? "vs-tr-toggle" : `mode-${id}`}>
+              {MODE_LABEL[id]}
+            </button>
+          ))}
+        </div>
+        <div className="vs-source" role="tablist" aria-label="视频来源" data-testid="vs-source">
+          <button type="button" role="tab" aria-selected={playingCache} aria-label="已缓存的整段视频" className={playingCache ? "is-on" : ""} onClick={chooseLocal} data-testid="vs-source-local">本地</button>
+          <button type="button" role="tab" aria-selected={!playingCache} className={!playingCache ? "is-on" : ""} onClick={() => switchSource("online")} data-testid="vs-source-online">在线</button>
+        </div>
+      </header>
+      <div className="desk-split">
+      <div className="vs-stage" ref={stageRef}>
+        <p className="desk-meta">
+          {yt.author ? `${yt.author} · ` : ""}
+          {yt.kind === "asr" ? "自动字幕" : "人工字幕"}
+          {" · "}
+          <a href={watchUrl(yt.v, at ?? 0)} target="_blank" rel="noreferrer">在 YouTube 打开 {at != null ? clockOf(at) : ""} <ExternalLink size={12} /></a>
+        </p>
+        <div className={hideVideo ? "desk-frame is-collapsed" : "desk-frame"}>
+        {playingCache ? (
+          <LocalPlayer key={readyUrl} ref={player} src={readyUrl} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} rate={speed} />
+        ) : (
+          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} onUseLocal={chooseLocal} rate={speed} />
+        )}
+        </div>
         <p className={playingCache ? "vs-local-name" : "vs-pick-note"} data-testid={playingCache ? "vs-local-name" : "vs-cache-status"}>
           {playingCache ? "本地 · 已缓存的整段" : cacheStatusLine(job, false)}
         </p>
-        {lines[cur] && (
+        {lines[cur] && mode !== "cards" && mode !== "cloze" && !(mode === "zh2en" && !revealed) && !(mode === "dictation" && !revealed) && (
           <div className="vs-now" data-testid="vs-now" data-sid={cur}>
-            <SentRow
-              sid={cur}
-              tokens={lines[cur].tokens}
-              active
-              selFrom={sel && lines[cur].tokens.some((t) => t.i >= sel.from && t.i <= sel.to) ? sel.from : -1}
-              selTo={sel && lines[cur].tokens.some((t) => t.i >= sel.from && t.i <= sel.to) ? sel.to : -1}
-              stamp={stampOf(lines[cur].tokens, items, phraseAt)}
-              timeLabel={times[cur] != null ? clockOf(times[cur]) : "–"}
-              showTr={showTr}
-              tr={tr[cur] ?? ""}
-              itemsRef={itemsRef}
-              phraseRef={phraseRef}
-              bus={bus}
-            />
+            {row(lines[cur], false)}
           </div>
+        )}
+        {practice && (
+          <LessonPractice
+            mode={mode}
+            sentence={doc.sentences[cur] ?? ""}
+            translation={tr[cur] ?? ""}
+            lessonId={lesson.id}
+            items={items}
+            keys={lessonKeys}
+            revealed={revealed}
+            onReveal={() => setRevealed((v) => !v)}
+          />
+        )}
+        {ipaOn && <p className="desk-ipa" data-testid="desk-ipa-line">{ipaLine || "正在查词典音标…"}</p>}
+        {recNote && <p className="desk-note" data-testid="rec-note">{recNote}</p>}
+        {noteFor != null && (
+          <form className="desk-note-form" onSubmit={(e) => { e.preventDefault(); saveOpenNote(); }}>
+            <label>第 {noteFor + 1} 句的笔记
+              <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={3} data-testid="sentence-note" />
+            </label>
+            <button type="submit">保存笔记</button>
+          </form>
         )}
         <div className="vs-bar" role="group" aria-label="本句播放">
-          <button type="button" onClick={() => step(-1)} disabled={cur <= 0} aria-label="上一句" data-testid="vs-prev">
-            <SkipBack size={16} /> <span>上一句</span>
-          </button>
-          <button type="button" onClick={replay} aria-label="重播本句" data-testid="vs-replay">
-            <RotateCcw size={16} /> <span>重播本句</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => player.current?.toggle()}
-            disabled={playDisabled}
-            aria-label={phase === "playing" ? "暂停" : "播放"}
-            data-testid="vs-play"
-          >
-            {phase === "playing" ? <Pause size={16} /> : <Play size={16} />} <span>{phase === "playing" ? "暂停" : "播放"}</span>
-          </button>
-          <button type="button" onClick={() => step(1)} disabled={cur >= last} aria-label="下一句" data-testid="vs-next">
-            <SkipForward size={16} /> <span>下一句</span>
-          </button>
-          <button type="button" className={showTr ? "is-on" : ""} onClick={() => setShowTr((s) => !s)} aria-pressed={showTr} aria-label={showTr ? "隐藏中译" : "显示中译"} data-testid="vs-tr-toggle">
-            <Languages size={16} /> <span>{showTr ? "隐藏中译" : "中译"}</span>
-          </button>
-          <div className="vs-source" role="tablist" aria-label="视频来源" data-testid="vs-source">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={playingCache}
-              aria-label="已缓存的整段视频"
-              className={playingCache ? "is-on" : ""}
-              onClick={chooseLocal}
-              data-testid="vs-source-local"
-            >
-              本地
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={!playingCache}
-              className={!playingCache ? "is-on" : ""}
-              onClick={() => switchSource("online")}
-              data-testid="vs-source-online"
-            >
-              在线
-            </button>
-          </div>
-          <span className="vs-count">
-            {cur + 1} / {doc.sentences.length}
-          </span>
+          <button type="button" onClick={() => setSpeed((n) => nextSpeed(n))} aria-label="播放速度" data-testid="desk-speed"><Gauge size={16} /> <span>{speed}×</span></button>
+          <button type="button" className={hideVideo ? "is-on" : ""} onClick={() => setHideVideo((v) => !v)} aria-pressed={hideVideo} aria-label={hideVideo ? "显示视频" : "隐藏视频"}>{hideVideo ? <Eye size={16} /> : <EyeOff size={16} />}</button>
+          <button type="button" onClick={() => { const node = stageRef.current; if (!node) return; if (document.fullscreenElement) void document.exitFullscreen(); else void node.requestFullscreen?.(); }} aria-label="全屏"><Maximize size={16} /></button>
+          <button type="button" className={ipaOn ? "is-on" : ""} aria-pressed={ipaOn} onClick={() => setIpaOn((v) => !v)} aria-label="音标" data-testid="desk-ipa">音标</button>
+          <button type="button" onClick={() => step(-1)} disabled={cur <= 0} aria-label="上一句" data-testid="vs-prev"><SkipBack size={16} /></button>
+          <button type="button" onClick={replay} aria-label="重播本句" data-testid="vs-replay"><RotateCcw size={16} /></button>
+          <button type="button" onClick={() => player.current?.toggle()} disabled={playDisabled} aria-label={phase === "playing" ? "暂停" : "播放"} data-testid="vs-play">{phase === "playing" ? <Pause size={16} /> : <Play size={16} />}</button>
+          <button type="button" onClick={() => step(1)} disabled={cur >= last} aria-label="下一句" data-testid="vs-next"><SkipForward size={16} /></button>
+          <button type="button" className={pointA != null ? "is-on" : ""} aria-pressed={pointA != null} onClick={() => setPointA((a) => (a === cur ? null : cur))} aria-label="设置 A 点" data-testid="desk-a">A点</button>
+          <button type="button" className={loopOn ? "is-on" : ""} aria-pressed={loopOn} onClick={() => setLoopOn((v) => !v)} aria-label="单句循环" data-testid="desk-loop"><Repeat size={16} /></button>
+          <label className="desk-interval">间隔
+            <input type="number" min={0} max={15} step={1} value={intervalSec} onChange={(e) => setIntervalSec(Math.max(0, Math.min(15, Number(e.target.value) || 0)))} aria-label="循环间隔秒数" data-testid="desk-interval" />
+          </label>
+          <button type="button" className={pauseAfter ? "is-on" : ""} aria-pressed={pauseAfter} onClick={() => setPauseAfter((v) => !v)} data-testid="desk-pause">单句暂停</button>
+          <span className="vs-count">{cur + 1} / {doc.sentences.length}</span>
         </div>
-        {hint && (
-          <p className="vs-hint" data-testid="vs-hint">
-            {hint}
-          </p>
-        )}
-        <p className="vs-hint hide-touch">← → 上一句 / 下一句 · R 重播 · 空格播放 · T 中译 · 点词查释义，拖选短语</p>
+        {hint && <p className="vs-hint" data-testid="vs-hint">{hint}</p>}
       </div>
       <div className="vs-subs" ref={listRef} role="list" aria-label="字幕" data-testid="vs-subs" onScroll={onListScroll}>
-        {held && (
-          <button type="button" className="vs-return" onClick={backToCurrent} data-testid="vs-return">
-            回到当前句
-          </button>
-        )}
-        {lines.map((line) => {
-          const hit = !!sel && line.tokens.length > 0 && sel.to >= line.tokens[0].i && sel.from <= line.tokens[line.tokens.length - 1].i;
-          return (
-            <SentRow
-              key={line.sid}
-              sid={line.sid}
-              tokens={line.tokens}
-              active={line.sid === cur}
-              selFrom={hit && sel ? sel.from : -1}
-              selTo={hit && sel ? sel.to : -1}
-              stamp={stampOf(line.tokens, items, phraseAt)}
-              timeLabel={times[line.sid] != null ? clockOf(times[line.sid]) : "–"}
-              showTr={false}
-              tr=""
-              itemsRef={itemsRef}
-              phraseRef={phraseRef}
-              bus={bus}
-            />
-          );
-        })}
+        <label className="desk-search">
+          <Search size={14} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索英文字幕" aria-label="搜索字幕" data-testid="transcript-search" />
+        </label>
+        {held && <button type="button" className="vs-return" onClick={backToCurrent} data-testid="vs-return">回到当前句</button>}
+        {visible.map((line) => row(line, true))}
+        {!visible.length && <p className="desk-empty">没有符合搜索的句子。</p>}
+      </div>
+      </div>
       </div>
     </div>
   );

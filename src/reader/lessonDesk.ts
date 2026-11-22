@@ -1,0 +1,163 @@
+/** Practice helpers for the lesson workspace. Comparisons are literal word checks. */
+import { sentenceSpan } from "./sync";
+
+export const DESK_MODES = ["both", "en", "zh", "dictation", "cloze", "read", "zh2en", "cards"] as const;
+export type DeskMode = (typeof DESK_MODES)[number];
+
+export const MODE_LABEL: Record<DeskMode, string> = {
+  both: "双语",
+  en: "英语",
+  zh: "中文",
+  dictation: "听写",
+  cloze: "挖空",
+  read: "阅读",
+  zh2en: "中译英",
+  cards: "词卡",
+};
+
+const STOP = new Set(
+  "a an the and or but if of to in on for with at from by as is are was were be been being it this that these those i you we he she they my your our not just so than then there here what when".split(" "),
+);
+
+export function showsEnglish(mode: DeskMode) {
+  return mode === "both" || mode === "en" || mode === "read" || mode === "cloze";
+}
+
+export function showsChinese(mode: DeskMode) {
+  return mode === "both" || mode === "zh" || mode === "read" || mode === "zh2en";
+}
+
+export function wordsOf(text: string): string[] {
+  return (text.toLowerCase().match(/[a-z0-9]+(?:'[a-z0-9]+)?/g) ?? []).filter(Boolean);
+}
+
+export interface WordCheck {
+  expected: string[];
+  typed: string[];
+  matches: boolean[];
+  extra: string[];
+  correct: number;
+  total: number;
+  same: boolean;
+}
+
+/** Compare typed English with the sentence. Order matters. Punctuation does not. */
+export function checkWords(expected: string, typed: string): WordCheck {
+  const want = wordsOf(expected);
+  const got = wordsOf(typed);
+  const matches = want.map((word, i) => got[i] === word);
+  const extra = got.slice(want.length);
+  const correct = matches.filter(Boolean).length;
+  return {
+    expected: want,
+    typed: got,
+    matches,
+    extra,
+    correct,
+    total: want.length,
+    same: extra.length === 0 && matches.every(Boolean) && want.length > 0,
+  };
+}
+
+export interface ClozePiece {
+  kind: "text" | "blank";
+  text: string;
+}
+
+/** Remove a stable subset of content words. The same sentence always blanks the same words. */
+export function clozePieces(sentence: string): { pieces: ClozePiece[]; answers: string[] } {
+  const re = /[A-Za-z]+(?:'[A-Za-z]+)?/g;
+  const content: { index: number; word: string }[] = [];
+  for (const match of sentence.matchAll(re)) {
+    const word = match[0];
+    if (word.length < 4 || STOP.has(word.toLowerCase())) continue;
+    content.push({ index: match.index ?? 0, word });
+  }
+  const chosen = new Set<number>();
+  content.forEach((row, i) => {
+    if (i % 3 === 0) chosen.add(row.index);
+  });
+  if (!chosen.size && content[0]) chosen.add(content[0].index);
+  const pieces: ClozePiece[] = [];
+  const answers: string[] = [];
+  let cursor = 0;
+  for (const match of sentence.matchAll(re)) {
+    const at = match.index ?? 0;
+    if (at > cursor) pieces.push({ kind: "text", text: sentence.slice(cursor, at) });
+    if (chosen.has(at)) {
+      answers.push(match[0]);
+      pieces.push({ kind: "blank", text: match[0] });
+    } else pieces.push({ kind: "text", text: match[0] });
+    cursor = at + match[0].length;
+  }
+  if (cursor < sentence.length) pieces.push({ kind: "text", text: sentence.slice(cursor) });
+  if (!pieces.length) pieces.push({ kind: "text", text: sentence });
+  return { pieces, answers };
+}
+
+export function checkCloze(answers: string[], typed: string[]): WordCheck {
+  return checkWords(answers.join(" "), typed.join(" "));
+}
+
+export interface LoopInput {
+  time: number;
+  start: number;
+  end: number;
+  enabled: boolean;
+  /** When true and the gap is 0, the sentence stops instead of repeating. */
+  pauseAfter: boolean;
+  intervalSec: number;
+  holding: boolean;
+  heldForSec: number;
+}
+
+export type LoopDecision = { type: "none" } | { type: "hold" } | { type: "restart"; at: number };
+
+export function loopDecision(input: LoopInput): LoopDecision {
+  if (!input.enabled || !Number.isFinite(input.start) || !Number.isFinite(input.end) || input.end <= input.start) return { type: "none" };
+  if (input.holding) {
+    if (input.pauseAfter && input.intervalSec <= 0) return { type: "none" };
+    if (input.heldForSec + 0.02 >= Math.max(0, input.intervalSec)) return { type: "restart", at: input.start };
+    return { type: "none" };
+  }
+  if (input.time < input.end - 0.12) return { type: "none" };
+  return { type: "hold" };
+}
+
+export function loopRange(times: number[], from: number, to: number): { start: number; end: number } | null {
+  if (!times.length) return null;
+  const a = Math.max(0, Math.min(from, to));
+  const b = Math.min(times.length - 1, Math.max(from, to));
+  const span = sentenceSpan(times, b);
+  const start = times[a];
+  if (span == null || start == null || !Number.isFinite(start)) return null;
+  return { start, end: Math.max(span.e, start + 0.2) };
+}
+
+export const SPEEDS = [0.75, 1, 1.25, 1.5, 2] as const;
+
+export function nextSpeed(current: number): number {
+  const i = SPEEDS.findIndex((n) => Math.abs(n - current) < 0.01);
+  return SPEEDS[(i + 1) % SPEEDS.length] ?? 1;
+}
+
+export interface DeskCard {
+  key: string;
+  text: string;
+  meaning: string;
+  due: number;
+  hasSrs: boolean;
+}
+
+/** Saved personal words only. A lesson never invents a sample card. */
+export function personalCards(items: { key: string; text: string; kind: string; meaning: string; status: number; srs?: { due: number }; ctx?: { lesson?: string } }[], lessonId: string, keys: ReadonlySet<string>): DeskCard[] {
+  const out: DeskCard[] = [];
+  for (const item of items) {
+    if (item.kind === "sentence" || item.status === -1) continue;
+    const inLesson = item.ctx?.lesson === lessonId || keys.has(item.key);
+    if (!inLesson) continue;
+    out.push({ key: item.key, text: item.text, meaning: item.meaning, due: item.srs?.due ?? Number.POSITIVE_INFINITY, hasSrs: !!item.srs });
+  }
+  out.sort((a, b) => a.due - b.due || a.text.localeCompare(b.text));
+  return out;
+}

@@ -120,8 +120,13 @@ function Shell({ privateAvailable }: { privateAvailable: boolean }) {
         setPalette(true);
       }
     };
+    const openLookup = () => setPalette(true);
     window.addEventListener("keydown", on);
-    return () => window.removeEventListener("keydown", on);
+    window.addEventListener("musk-atlas:lookup", openLookup);
+    return () => {
+      window.removeEventListener("keydown", on);
+      window.removeEventListener("musk-atlas:lookup", openLookup);
+    };
   }, [focus]);
 
   useEffect(() => {
