@@ -161,3 +161,27 @@ export function personalCards(items: { key: string; text: string; kind: string; 
   out.sort((a, b) => a.due - b.due || a.text.localeCompare(b.text));
   return out;
 }
+
+/** What the current transcript row may put in the document. Hidden answers are omitted, not faded. */
+export type RowDisclosure = "full" | "english-hidden" | "answer-hidden";
+
+export function rowDisclosure(mode: DeskMode, revealed: boolean, isCurrent: boolean, inTranscript: boolean): RowDisclosure {
+  if (!isCurrent && !(mode === "zh" && inTranscript)) return "full";
+  if ((mode === "dictation" || mode === "cloze") && isCurrent && !revealed) return "answer-hidden";
+  if (mode === "zh2en" && isCurrent && !revealed) return "english-hidden";
+  if (mode === "zh" && inTranscript) return "english-hidden";
+  return "full";
+}
+
+/** A drag across two different word indexes. A press that stays on one word is a click, not a phrase. */
+export function dragPhrase(start: number, end: number): { from: number; to: number } | null {
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < 0 || start === end) return null;
+  return { from: Math.min(start, end), to: Math.max(start, end) };
+}
+
+/** Tokens a native selection actually covers. One word stays a click. */
+export function selectedPhrase(indexes: number[]): { from: number; to: number } | null {
+  const ids = indexes.filter((n) => Number.isInteger(n) && n >= 0);
+  if (ids.length < 2) return null;
+  return { from: Math.min(...ids), to: Math.max(...ids) };
+}

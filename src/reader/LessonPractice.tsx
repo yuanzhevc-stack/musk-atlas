@@ -77,7 +77,7 @@ export function LessonPractice({
               <input
                 key={i}
                 className="desk-blank"
-                aria-label={`填空 ${piece.text.length} 个字母`}
+                aria-label="填空"
                 value={clozeTyped[cloze.pieces.slice(0, i).filter((p) => p.kind === "blank").length] ?? ""}
                 onChange={(e) => {
                   const n = cloze.pieces.slice(0, i).filter((p) => p.kind === "blank").length;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkCloze, checkWords, clozePieces, loopDecision, loopRange, nextSpeed, personalCards } from "./lessonDesk.ts";
+import { checkCloze, checkWords, clozePieces, dragPhrase, loopDecision, loopRange, nextSpeed, personalCards, rowDisclosure, selectedPhrase } from "./lessonDesk.ts";
 
 test("dictation compares words and ignores punctuation", () => {
   const hit = checkWords("Now we go this way.", "now we go this way");
@@ -44,6 +44,25 @@ test("an A-B range uses the first start and the last sentence end", () => {
 test("speed cycles through the real steps", () => {
   assert.equal(nextSpeed(1), 1.25);
   assert.equal(nextSpeed(2), 0.75);
+});
+
+test("answer modes omit the sentence until reveal, then put it back", () => {
+  assert.equal(rowDisclosure("dictation", false, true, true), "answer-hidden");
+  assert.equal(rowDisclosure("cloze", false, true, true), "answer-hidden");
+  assert.equal(rowDisclosure("zh2en", false, true, true), "english-hidden");
+  assert.equal(rowDisclosure("dictation", true, true, true), "full");
+  assert.equal(rowDisclosure("zh2en", true, true, true), "full");
+  assert.equal(rowDisclosure("dictation", false, false, true), "full");
+  assert.equal(rowDisclosure("both", false, true, true), "full");
+  assert.equal(rowDisclosure("zh", false, false, true), "english-hidden");
+});
+
+test("a drag across words is a phrase and a single press is not", () => {
+  assert.deepEqual(dragPhrase(4, 7), { from: 4, to: 7 });
+  assert.deepEqual(dragPhrase(7, 4), { from: 4, to: 7 });
+  assert.equal(dragPhrase(4, 4), null);
+  assert.deepEqual(selectedPhrase([8, 5, 6]), { from: 5, to: 8 });
+  assert.equal(selectedPhrase([3]), null);
 });
 
 test("cards are saved lesson words ordered by review time", () => {
