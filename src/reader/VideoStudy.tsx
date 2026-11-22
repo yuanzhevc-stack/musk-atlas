@@ -1,5 +1,5 @@
 /** Video-first study: player and the lesson's own captions. Word taps reuse the reader card. */
-import { BookMarked, BookOpen, Compass, Copy, ExternalLink, Eye, EyeOff, Maximize, Mic, MoreHorizontal, Pause, Play, Repeat, RotateCcw, Search, SkipBack, SkipForward, StickyNote, Star } from "lucide-react";
+import { BookMarked, BookOpen, Compass, Copy, Eye, EyeOff, Maximize, Mic, MoreHorizontal, Pause, Play, Repeat, RotateCcw, Search, SkipBack, SkipForward, StickyNote, Star } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { Item, Lesson, Token } from "./model";
@@ -109,12 +109,9 @@ const SentRow = memo(
             );
           })}
         </div>
-          {disclosure !== "answer-hidden" && showTr && (
-            <p className="vs-tr" data-testid="vs-tr">
-              <small>机器翻译 · MyMemory 或 Google</small>
-              {tr || "正在取译文…"}
-            </p>
-          )}
+          {disclosure !== "answer-hidden" && showTr && tr ? (
+            <p className="vs-tr" data-testid="vs-tr">{tr}</p>
+          ) : null}
         </div>
       </div>
     );
@@ -735,7 +732,7 @@ export function VideoStudy({
           </label>
           <button type="button" className={pauseAfter ? "is-on" : ""} aria-pressed={pauseAfter} onClick={() => setPauseAfter((v) => !v)} data-testid="desk-pause"><RotateCcw size={14} /><span>单句暂停</span></button>
         </div>
-        <p className="desk-cache" data-testid={playingCache && phase !== "error" ? "vs-local-name" : "vs-cache-status"}>{cacheLine} · {cur + 1}/{doc.sentences.length}</p>
+        <p className="desk-cache" hidden data-testid={playingCache && phase !== "error" ? "vs-local-name" : "vs-cache-status"}>{cacheLine}</p>
         <div className="desk-sheet">
         {lines[cur] && mode !== "cards" && mode !== "cloze" && !(mode === "zh2en" && !revealed) && !(mode === "dictation" && !revealed) && (
           <div className="vs-now" data-testid="vs-now" data-sid={cur}>
@@ -755,7 +752,7 @@ export function VideoStudy({
             onReveal={() => setRevealed((v) => !v)}
           />
         )}
-        {ipaOn && <p className="desk-ipa" data-testid="desk-ipa-line">{ipaLine || "正在查词典音标…"}</p>}
+        {ipaOn && <p className="desk-ipa" data-testid="desk-ipa-line">{ipaLine || "词典里没有这一句的音标。"}</p>}
         {recNote && <p className="desk-note" data-testid="rec-note">{recNote}</p>}
         {noteFor != null && (
           <form className="desk-note-form" onSubmit={(e) => { e.preventDefault(); saveOpenNote(); }}>
@@ -766,7 +763,11 @@ export function VideoStudy({
           </form>
         )}
         {hint && <p className="vs-hint" data-testid="vs-hint">{hint}</p>}
-        <p className="desk-yt"><a href={watchUrl(yt.v, at ?? 0)} target="_blank" rel="noreferrer">在 YouTube 打开 <ExternalLink size={11} /></a></p>
+        <details className="desk-details">
+          <summary>来源</summary>
+          <p>{cacheLine} · {cur + 1}/{doc.sentences.length}</p>
+          <p><a href={watchUrl(yt.v, at ?? 0)} target="_blank" rel="noreferrer">在 YouTube 打开</a></p>
+        </details>
         </div>
       </div>
       <div className="vs-subs" ref={listRef} role="list" aria-label="字幕" data-testid="vs-subs" onScroll={onListScroll}>
