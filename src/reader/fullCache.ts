@@ -126,11 +126,29 @@ export function cacheStatusLine(view: CacheView | null, playingLocal: boolean): 
   if (view.status === "running") return "正在下载整段。先用在线。";
   if (view.status === "refused") return "YouTube 拒绝了下载。先用在线。不会绕过这个检查。";
   if (view.error === "daily-cap") return "今天的缓存额度用完了，先用在线。";
+  if (view.error === "retry-cap") return "这节课的手动重试次数已经用完。先用在线。";
   if (view.status === "ready" && view.verified) {
     const seen = picture(view);
     return seen ? `整段已缓存，${seen}。这次继续在线，下次打开用本地。` : "整段已缓存。这次继续在线，下次打开用本地。";
   }
+  const why = publicError(view.error);
+  if (why === "ejs-missing") return "下载机缺少 yt-dlp-ejs，没有请求视频。先用在线。";
+  if (why === "deno-missing") return "下载机缺少 deno，没有请求视频。先用在线。";
+  if (why === "above-720") return "成片高于 720p，已拒绝，没有上传。先用在线。";
+  if (why === "unmeasured-height") return "没有量到画面高度，已拒绝，没有上传。先用在线。";
+  if (why) return `缓存没有做成：${why}。先用在线。`;
   return "缓存没有做成，已停止重试。先用在线。";
+}
+
+/** Visible failure text. Credential-shaped fragments are removed. */
+export function publicError(error: string | undefined): string {
+  if (!error) return "";
+  return error
+    .replace(/bearer\s+\S+/gi, "")
+    .replace(/(secret|token|authorization|api[_-]?key)\s*[=:]\s*\S+/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
 }
 
 function rememberJob(view: CacheView) {
@@ -149,8 +167,25 @@ export function rememberedJob(videoId: string): CacheView | null {
 
 async function readBody(res: Response, v: string): Promise<CacheView> {
   const raw = (await res.json().catch(() => ({}))) as Partial<CacheView>;
-  if (res.status === 429) return viewFrom({ ...raw, v, status: "failed", error: "daily-cap", runner: raw.runner ?? "configured" }, v);
+  if (res.status === 429) return viewFrom({ ...raw, v, status: raw.status ?? "failed", error: raw.error ?? "daily-cap", runner: raw.runner ?? "configured" }, v);
   return viewFrom(raw, v);
+}
+
+export async function retryFullCache(v: string, fetchImpl: typeof fetch = fetch): Promise<CacheView> {
+  try {
+    const res = await fetchImpl(`${TTS_URL}/full/jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ v, origin: "manual", retry: true }),
+    });
+    const view = await readBody(res, v);
+    rememberJob(view);
+    return view;
+  } catch {
+    const view: CacheView = { v, status: "unknown", runner: "unreachable", verified: false };
+    rememberJob(view);
+    return view;
+  }
 }
 
 export async function enqueueFullCache(v: string, fetchImpl: typeof fetch = fetch): Promise<CacheView> {

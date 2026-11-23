@@ -7,7 +7,14 @@ this cloud VM. It does not use cookies, proxies, or a private YouTube client.
 Environment:
   CACHE_WORKER_URL   https://musk-atlas-tts.yuanzhevc.workers.dev
   CACHE_JOB_SECRET   same value as `wrangler secret put CACHE_JOB_SECRET`
-  The machine also needs `yt-dlp`, `ffmpeg`, and `ffprobe`.
+  The machine also needs, in the same environment that runs this file:
+    yt-dlp 2026.10.26
+    yt-dlp-ejs 0.8.0  (`import yt_dlp_ejs` must succeed)
+    deno on PATH (2.9.8 is the known-good build)
+    ffmpeg and ffprobe
+  A missing EJS package or deno stops before any video request and is reported
+  as ejs-missing or deno-missing. It is not a YouTube refusal and it is not retried
+  with cookies, a proxy, or a spoofed client.
   Upload uses the Worker, so wrangler and R2_API_TOKEN are not required.
 
 YouTube refusing the download is reported as refused and is not retried here.
@@ -34,6 +41,27 @@ MIN_SECONDS = 20
 APP_USER_AGENT = "musk-atlas-cache/1.0 (+https://yuanzhevc-stack.github.io/musk-atlas/)"
 WORKER_HOST = "musk-atlas-tts.yuanzhevc.workers.dev"
 REFUSED_MARKS = ("sign in to confirm", "not a bot", "login required", "confirm you’re not a bot", "confirm you're not a bot")
+
+
+def dependency_problem(*, ytdlp: bool, ffmpeg: bool, ffprobe: bool, deno: bool, ejs: bool) -> str | None:
+    if not ytdlp:
+        return "ytdlp-missing"
+    if not ffmpeg or not ffprobe:
+        return "ffmpeg-missing"
+    if not deno:
+        return "deno-missing"
+    if not ejs:
+        return "ejs-missing"
+    return None
+
+
+def failure_code(text: str) -> str:
+    low = text.lower()
+    if "yt-dlp-ejs" in low or "challenge solver" in low or ("ejs" in low and "403" in low):
+        return "ejs-missing"
+    if "403" in low:
+        return "http-403"
+    return text[-180:]
 
 
 def classify_ytdlp(code: int, text: str) -> str:
@@ -206,7 +234,8 @@ def run_once(worker: str, secret: str) -> int:
         text = (proc.stdout or "") + "\n" + (proc.stderr or "")
         kind = classify_ytdlp(proc.returncode, text)
         if kind != "downloaded" or not os.path.isfile(target) or target.endswith(".part"):
-            post(worker.rstrip("/") + "/full/result", secret, {"v": video_id, "outcome": "refused" if kind == "refused" else "failed", "error": text[-180:]})
+            error = "youtube-refused" if kind == "refused" else failure_code(text)
+            post(worker.rstrip("/") + "/full/result", secret, {"v": video_id, "outcome": "refused" if kind == "refused" else "failed", "error": error})
             print(kind)
             return 2
         size = os.path.getsize(target)
@@ -255,8 +284,20 @@ def main() -> int:
             file=sys.stderr,
         )
         return 0
-    if shutil.which("yt-dlp") is None or shutil.which("ffprobe") is None:
-        print("yt-dlp and ffprobe must be installed on the machine that runs this.", file=sys.stderr)
+    try:
+        import yt_dlp_ejs  # noqa: F401
+        has_ejs = True
+    except ImportError:
+        has_ejs = False
+    missing = dependency_problem(
+        ytdlp=shutil.which("yt-dlp") is not None,
+        ffmpeg=shutil.which("ffmpeg") is not None,
+        ffprobe=shutil.which("ffprobe") is not None,
+        deno=shutil.which("deno") is not None,
+        ejs=has_ejs,
+    )
+    if missing:
+        print(f"{missing}: not claiming. Install the pinned tool in this Python environment before --manual.", file=sys.stderr)
         return 1
     if not require_manual_worker(worker, secret):
         return 3

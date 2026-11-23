@@ -12,7 +12,7 @@ import { lessonMedia } from "../reader/sync";
 import { VideoStudy } from "../reader/VideoStudy";
 import { gsel } from "../reader/select";
 import { captionsToLesson, clockOf, fetchCaptions, watchUrl, youtubeId } from "../reader/youtube";
-import { enqueueFullCache } from "../reader/fullCache";
+import { retryFullCache } from "../reader/fullCache";
 import { Sheet } from "../ui/Sheet";
 import { toast } from "../ui/Toast";
 
@@ -119,7 +119,7 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
         const { text: body, times } = captionsToLesson(c);
         if (!body.trim()) throw new Error("字幕是空的");
         const ls = reader.addLesson({ title: title.trim() || c.title || vid, url: watchUrl(vid), text: body, yt: { v: vid, times, kind: c.kind, author: c.author } });
-        await enqueueFullCache(vid);
+        await retryFullCache(vid);
         reset();
         onClose();
         go({ page: "reader", l: ls.id });

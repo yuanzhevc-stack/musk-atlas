@@ -8,6 +8,7 @@ import {
   bearerOk,
   claim,
   enqueue,
+  retryManual,
   fullMediaUrl,
   handleFullCache,
   report,
@@ -221,6 +222,54 @@ test("a ready report keeps the measured picture and does not invent 720p", async
   const rec = JSON.parse(b.store.get(`full/ready/${id}.json`)!);
   assert.equal(rec.height, 1080);
   assert.equal(rec.height === 720, false);
+});
+
+test("a normal post leaves a terminal manual failure alone and an explicit retry requeues it once", async () => {
+  const b = bucket();
+  const id = "ZXsQAXx_ao0";
+  await enqueue(b, id, 1_000, "configured", "manual");
+  await claim(b, 2_000);
+  await report(b, id, "failed", 3_000, { error: "HTTP Error 403" });
+  await claim(b, 4_000);
+  await report(b, id, "failed", 5_000, { error: "ejs-missing" });
+  const stuck = JSON.parse(b.store.get(`full/jobs/${id}.json`)!);
+  assert.equal(stuck.status, "failed");
+  assert.equal(stuck.attempts, 2);
+  const polled = await handleFullCache(
+    new Request("https://worker.test/full/jobs", { method: "POST", body: JSON.stringify({ v: id, origin: "manual" }) }),
+    b,
+    headers,
+    { secret: "", now: 6_000 },
+  );
+  const polledJob = await polled.json();
+  assert.equal(polled.status, 200);
+  assert.equal(polledJob.status, "failed");
+  assert.equal(polledJob.attempts, 2);
+  const again = await enqueue(b, id, 7_000, "configured", "manual");
+  assert.equal(again.job.status, "failed");
+  assert.equal(again.job.attempts, 2);
+  const retried = await handleFullCache(
+    new Request("https://worker.test/full/jobs", { method: "POST", body: JSON.stringify({ v: id, origin: "manual", retry: true }) }),
+    b,
+    headers,
+    { secret: "", now: 8_000 },
+  );
+  const queued = await retried.json();
+  assert.equal(retried.status, 200);
+  assert.equal(queued.status, "queued");
+  assert.equal(queued.attempts, 0);
+  assert.equal(queued.manualRetries, 1);
+  assert.equal(queued.history[0].error, "ejs-missing");
+  assert.equal(queued.history[0].attempts, 2);
+  const legacy = "bbbbbbbbbbb";
+  b.store.set(`full/jobs/${legacy}.json`, JSON.stringify({ v: legacy, status: "failed", attempts: 2, maxAttempts: 2, created: 1, updated: 1, runner: "configured", error: "old" }));
+  const legacyRetry = await retryManual(b, legacy, 9_000, "configured");
+  assert.equal(legacyRetry.job.status, "failed");
+  assert.equal(legacyRetry.job.origin, undefined);
+  b.store.set(`full/jobs/${id}.json`, JSON.stringify({ ...queued, status: "refused", error: "youtube-refused" }));
+  const refused = await retryManual(b, id, 10_000, "configured");
+  assert.equal(refused.job.status, "refused");
+  assert.equal(refused.job.attempts, 0);
 });
 
 test("capability announces manual-only and a 720 cap", async () => {

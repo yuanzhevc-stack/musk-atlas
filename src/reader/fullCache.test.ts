@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { adoptReady, cacheStatusLine, enqueueFullCache, fullMediaUrl, openingSource, readFullCache, rememberedReady, type CacheView } from "./fullCache";
+import { adoptReady, cacheStatusLine, enqueueFullCache, fullMediaUrl, openingSource, publicError, readFullCache, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
 
 const mem = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -60,6 +60,15 @@ test("enqueue sends only the video id and keeps a refusal", async () => {
   assert.equal(measured.includes("没有 720p"), false);
   assert.equal(measured.includes("实际 720p"), false);
   assert.equal(/选择文件|上传/.test(cacheStatusLine(view, false)), false);
+  assert.match(cacheStatusLine({ ...view, status: "failed", error: "ejs-missing" }, false), /yt-dlp-ejs/);
+  assert.equal(publicError("boom bearer SECRETVALUE token=abc"), "boom");
+  assert.equal(cacheStatusLine({ ...view, status: "failed", error: "bearer SECRETVALUE http-403" }, false).includes("SECRETVALUE"), false);
+  let retryBody = "";
+  await retryFullCache(id, async (_url, init) => {
+    retryBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({ v: id, status: "queued", runner: "configured", attempts: 0, manualRetries: 1 }), { status: 200 });
+  });
+  assert.deepEqual(JSON.parse(retryBody), { v: id, origin: "manual", retry: true });
 });
 
 test("a public ready record is accepted only when it is a full file", async () => {

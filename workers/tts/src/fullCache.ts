@@ -7,6 +7,9 @@
 export const YT_ID = /^[A-Za-z0-9_-]{11}$/;
 export const MAX_ATTEMPTS = 2;
 export const DAILY_NEW = 6;
+/** Explicit retries of a terminal manual failure. Polling does not spend these. */
+export const MAX_MANUAL_RETRIES = 2;
+export const DAILY_RETRIES = 6;
 export const MIN_FULL_BYTES = 2_000_000;
 export const MIN_FULL_SECONDS = 20;
 export const MIN_PART_BYTES = 5 * 1024 * 1024;
@@ -39,6 +42,9 @@ export interface FullJob extends MediaFacts {
   runner: "configured" | "missing";
   /** Pasted-link jobs are the only ones a claim may take. Older queued files stay put. */
   origin?: JobOrigin;
+  /** How many times a person explicitly requeued a terminal failure. */
+  manualRetries?: number;
+  history?: { at: number; status: string; error?: string; attempts: number }[];
 }
 
 export interface ReadyRecord extends MediaFacts {
@@ -74,6 +80,19 @@ export const mediaKey = (v: string) => `full/${v}.mp4`;
 export const fullMediaUrl = (v: string) => `${PUBLIC_BASE}/full/${v}.mp4`;
 export const uploadKey = (v: string) => `full/uploads/${v}.json`;
 const budgetKey = (day: string) => `full/_budget/${day}.json`;
+const retryBudgetKey = (day: string) => `full/_retry/${day}.json`;
+
+/** Drop credential-shaped text. The browser may show what remains. */
+export function publicError(error: string | undefined): string | undefined {
+  if (!error) return undefined;
+  const clean = error
+    .replace(/bearer\s+\S+/gi, "[redacted]")
+    .replace(/(secret|token|authorization|api[_-]?key)\s*[=:]\s*\S+/gi, "[redacted]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
+  return clean || undefined;
+}
 
 export function partSizeOk(size: number, isLast: boolean): boolean {
   if (!Number.isFinite(size) || size <= 0 || size > MAX_PART_BYTES) return false;
@@ -189,6 +208,47 @@ export async function enqueue(bucket: JobBucket, v: string, now: number, runner:
   return { status: 200, job };
 }
 
+/** A person asked to try a terminal manual failure again. Refusals, legacy jobs, and ordinary posts do not come here. */
+export async function retryManual(bucket: JobBucket, v: string, now: number, runner: FullJob["runner"]): Promise<{ status: number; job: FullJob }> {
+  const ready = await bucket.get(readyKey(v));
+  if (ready) {
+    const job = (await readJob(bucket, v)) ?? fresh(v, now, runner, "manual");
+    return { status: 200, job: { ...job, status: "ready", runner, updated: now } };
+  }
+  const existing = await readJob(bucket, v);
+  if (!existing) return enqueue(bucket, v, now, runner, "manual");
+  if (existing.origin !== "manual" || existing.status === "refused" || existing.status === "queued" || existing.status === "running" || existing.status === "ready") {
+    return { status: 200, job: { ...existing, runner } };
+  }
+  if (existing.status !== "failed") return { status: 200, job: { ...existing, runner } };
+  if ((existing.manualRetries ?? 0) >= MAX_MANUAL_RETRIES) {
+    return { status: 429, job: { ...existing, runner, error: "retry-cap" } };
+  }
+  const day = new Date(now).toISOString().slice(0, 10);
+  const key = retryBudgetKey(day);
+  const obj = await bucket.get(key);
+  let used = 0;
+  if (obj) {
+    try {
+      used = Number((JSON.parse(await obj.text()) as { n?: number }).n ?? 0);
+    } catch {
+      used = 0;
+    }
+  }
+  if (used >= DAILY_RETRIES) return { status: 429, job: { ...existing, runner, error: "daily-cap" } };
+  const prior = { at: existing.updated, status: existing.status, error: publicError(existing.error), attempts: existing.attempts };
+  existing.history = [...(existing.history ?? []), prior].slice(-6);
+  existing.manualRetries = (existing.manualRetries ?? 0) + 1;
+  existing.attempts = 0;
+  existing.status = "queued";
+  existing.error = undefined;
+  existing.updated = now;
+  existing.runner = runner;
+  await writeJob(bucket, existing);
+  await bucket.put(key, JSON.stringify({ n: used + 1 }), { httpMetadata: { contentType: "application/json" } });
+  return { status: 200, job: existing };
+}
+
 export async function claim(bucket: JobBucket, now: number): Promise<FullJob | null> {
   const keys = await bucket.list("full/jobs/");
   const jobs: FullJob[] = [];
@@ -259,7 +319,7 @@ export async function report(
     await writeJob(bucket, job);
     return { status: 200, job };
   }
-  job.error = (detail.error ?? outcome).slice(0, 180);
+  job.error = publicError(detail.error ?? outcome);
   if (outcome === "refused") job.status = "refused";
   else job.status = job.attempts >= MAX_ATTEMPTS ? "failed" : "queued";
   await writeJob(bucket, job);
@@ -404,7 +464,7 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
     return json(job ? { ...job, runner } : { v, status: "unknown", runner }, 200, headers);
   }
   if (url.pathname === "/full/jobs" && req.method === "POST") {
-    let body: { v?: unknown; url?: unknown; origin?: unknown };
+    let body: { v?: unknown; url?: unknown; origin?: unknown; retry?: unknown };
     try {
       body = (await req.json()) as typeof body;
     } catch {
@@ -419,7 +479,7 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
       if (ready) return json({ ...(existing ?? { v }), v, status: "ready", runner }, 200, headers);
       return json(existing ? { ...existing, runner } : { v, status: "unknown", runner }, 200, headers);
     }
-    const result = await enqueue(bucket, v, opts.now, runner, "manual");
+    const result = body.retry === true ? await retryManual(bucket, v, opts.now, runner) : await enqueue(bucket, v, opts.now, runner, "manual");
     return json(result.job, result.status, headers);
   }
   return json({ error: "not-found" }, 404, headers);
