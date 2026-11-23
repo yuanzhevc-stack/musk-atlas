@@ -200,6 +200,7 @@ export function VideoStudy({
   const loopHold = useRef<{ at: number } | null>(null);
   const atEnd = useRef(false);
   const started = useRef(source);
+  const pinnedOnline = useRef(false);
   const [job, setJob] = useState<CacheView | null>(() => rememberedJob(yt.v));
   const [bootAt, setBootAt] = useState(() => times[cur] ?? 0);
   const clock = useRef(times[cur] ?? 0);
@@ -564,7 +565,9 @@ export function VideoStudy({
       setJob(next);
       const now = phaseRef.current;
       const phaseKind = now === "loading" || now === "playing" || now === "paused" ? now : "other";
-      if (adoptReady(started.current, phaseKind, next.verified, rememberedReady(yt.v) != null) === "online") setSource("online");
+      const decision = adoptReady(started.current, phaseKind, next.verified, rememberedReady(yt.v) != null);
+      if (decision === "online") setSource("online");
+      else if (decision === "local" && !pinnedOnline.current) setSource("local");
     };
     void tick();
     const id = window.setInterval(() => void tick(), 10_000);
@@ -576,6 +579,7 @@ export function VideoStudy({
   const readyUrl = (job?.verified ? job.url : rememberedReady(yt.v)?.url) ?? "";
   const playingCache = source === "local" && readyUrl === fullMediaUrl(yt.v);
   const switchSource = (next: SourceChoice) => {
+    pinnedOnline.current = next === "online";
     const reported = player.current?.getTime();
     const t = typeof reported === "number" && reported >= 0.4 ? reported : clock.current;
     setBootAt(Number.isFinite(t) ? t : (times[cur] ?? 0));

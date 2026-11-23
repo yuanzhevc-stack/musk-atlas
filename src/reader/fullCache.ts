@@ -1,6 +1,6 @@
 /** Ask the Worker to cache a full YouTube lesson, then read the verified result.
  *  The browser never downloads or uploads the video. A missing Worker is a status, not a spinner. */
-import { lessonCache, readChoice, type SourceChoice } from "./hostedLesson";
+import { lessonCache, type SourceChoice } from "./hostedLesson";
 
 const TTS_URL = "https://musk-atlas-tts.yuanzhevc.workers.dev";
 
@@ -72,15 +72,14 @@ export function forgetReady(videoId: string) {
 }
 
 export function openingSource(videoId: string): SourceChoice {
-  if (readChoice(videoId) === "online") return "online";
-  if (rememberedReady(videoId)) return "local";
-  if (lessonCache(videoId).kind === "full") return "local";
+  if (rememberedReady(videoId) || lessonCache(videoId).kind === "full") return "local";
   return "online";
 }
 
-/** A visit that already started on YouTube stays there. The next open uses the cache. */
-export function adoptReady(started: SourceChoice, phase: "loading" | "playing" | "paused" | "other", ready: boolean, kept = false): "online" | "stay" {
-  if (!ready && !kept && started === "local" && phase === "loading") return "online";
+/** Use the stored full file as soon as it is verified. A missing file falls back to YouTube. */
+export function adoptReady(started: SourceChoice, phase: "loading" | "playing" | "paused" | "other", ready: boolean, kept = false): "online" | "local" | "stay" {
+  if (ready || kept) return "local";
+  if (started === "local" && phase === "loading") return "online";
   return "stay";
 }
 
@@ -129,7 +128,7 @@ export function cacheStatusLine(view: CacheView | null, playingLocal: boolean): 
   if (view.error === "retry-cap") return "这节课的手动重试次数已经用完。先用在线。";
   if (view.status === "ready" && view.verified) {
     const seen = picture(view);
-    return seen ? `整段已缓存，${seen}。这次继续在线，下次打开用本地。` : "整段已缓存。这次继续在线，下次打开用本地。";
+    return seen ? `整段已在存储，${seen}。` : "整段已在存储。";
   }
   const why = publicError(view.error);
   if (why === "ejs-missing") return "下载机缺少 yt-dlp-ejs，没有请求视频。先用在线。";

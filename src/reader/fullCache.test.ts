@@ -34,12 +34,12 @@ test("opening a lesson uses a verified full file and never a sentence clip", () 
   assert.equal(JSON.parse(localStorage.getItem("musk-atlas:reader:v1")!).items.oldword.meaning, "旧词保留");
 });
 
-test("a youtube visit keeps its player when the cache becomes ready", () => {
-  assert.equal(adoptReady("online", "playing", true), "stay");
-  assert.equal(adoptReady("online", "paused", true), "stay");
-  assert.equal(adoptReady("online", "loading", true), "stay");
+test("a verified cache uses the stored file on this visit", () => {
+  assert.equal(adoptReady("online", "playing", true), "local");
+  assert.equal(adoptReady("online", "paused", true), "local");
+  assert.equal(adoptReady("online", "loading", true), "local");
   assert.equal(adoptReady("local", "loading", false), "online");
-  assert.equal(adoptReady("local", "loading", false, true), "stay");
+  assert.equal(adoptReady("local", "loading", false, true), "local");
   assert.equal(adoptReady("local", "playing", false), "stay");
 });
 
