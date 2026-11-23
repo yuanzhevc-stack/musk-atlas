@@ -8,7 +8,7 @@ from unittest import mock
 
 import cache_full
 import seed_full
-from cache_full import APP_USER_AGENT, WORKER_HOST, classify_ytdlp, post, put_part, upload_via_worker, worker_request, ytdlp_command
+from cache_full import APP_USER_AGENT, MANUAL_FORMAT, WORKER_HOST, classify_ytdlp, post, put_part, run_mode, upload_via_worker, worker_request, ytdlp_command
 
 SECRET = "unit-secret-not-real"
 BASE = f"https://{WORKER_HOST}"
@@ -81,15 +81,31 @@ class WorkerClient(unittest.TestCase):
             self.assert_app_request(req, req.get_method())
         self.assertNotIn(SECRET, buf.getvalue())
 
-    def test_youtube_download_command_is_unchanged(self):
+    def test_youtube_download_command_caps_720p_without_a_transcode(self):
         command = ytdlp_command("s9mczdODqzo", "/tmp/s9mczdODqzo.mp4")
         joined = " ".join(command)
         self.assertEqual(command[0], "yt-dlp")
+        self.assertIn(MANUAL_FORMAT, command)
+        self.assertIn("height<=720", MANUAL_FORMAT)
+        self.assertIn("fps<=30", MANUAL_FORMAT)
+        self.assertIn("vcodec^=avc1", MANUAL_FORMAT)
+        self.assertIn("acodec^=mp4a", MANUAL_FORMAT)
+        self.assertIn("res:720,fps:30,vcodec:h264,acodec:aac,ext:mp4", command)
+        self.assertIn("Merger+ffmpeg:-c copy -movflags +faststart", command)
+        self.assertNotIn("--recode-video", command)
+        self.assertNotIn("--cookies", command)
+        self.assertNotIn("--proxy", command)
         self.assertNotIn("--user-agent", command)
         self.assertNotIn("--add-header", command)
         self.assertNotIn("Mozilla", joined)
         self.assertNotIn(APP_USER_AGENT, joined)
         self.assertIn("https://www.youtube.com/watch?v=s9mczdODqzo", command)
+
+    def test_plain_startup_does_not_claim(self):
+        self.assertEqual(run_mode(["cache_full.py"]), "paused")
+        self.assertEqual(run_mode(["cache_full.py", "--loop"]), "paused")
+        self.assertEqual(run_mode(["cache_full.py", "--manual"]), "manual-once")
+        self.assertEqual(run_mode(["cache_full.py", "--manual", "--loop"]), "manual-loop")
 
     def test_helper_refuses_any_other_host(self):
         with self.assertRaises(RuntimeError):

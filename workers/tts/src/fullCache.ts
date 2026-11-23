@@ -16,7 +16,15 @@ export const STALE_MS = 20 * 60 * 1000;
 export const PUBLIC_BASE = "https://pub-ad0e50befa7b4387a7d73a8c8a796eb3.r2.dev";
 
 export type JobStatus = "queued" | "running" | "ready" | "refused" | "failed";
-export interface FullJob {
+export type JobOrigin = "manual" | "legacy";
+export interface MediaFacts {
+  width?: number;
+  height?: number;
+  fps?: number;
+  vcodec?: string;
+  acodec?: string;
+}
+export interface FullJob extends MediaFacts {
   v: string;
   status: JobStatus;
   attempts: number;
@@ -27,9 +35,11 @@ export interface FullJob {
   bytes?: number;
   duration?: number;
   runner: "configured" | "missing";
+  /** Pasted-link jobs are the only ones a claim may take. Older queued files stay put. */
+  origin?: JobOrigin;
 }
 
-export interface ReadyRecord {
+export interface ReadyRecord extends MediaFacts {
   v: string;
   verified: true;
   bytes: number;
@@ -86,8 +96,22 @@ export function bearerOk(header: string | null, secret: string): boolean {
   return diff === 0;
 }
 
-function fresh(v: string, now: number, runner: FullJob["runner"]): FullJob {
-  return { v, status: "queued", attempts: 0, maxAttempts: MAX_ATTEMPTS, created: now, updated: now, runner };
+function fresh(v: string, now: number, runner: FullJob["runner"], origin: JobOrigin): FullJob {
+  return { v, status: "queued", attempts: 0, maxAttempts: MAX_ATTEMPTS, created: now, updated: now, runner, origin };
+}
+
+const CODEC = /^[A-Za-z0-9_.]{2,20}$/;
+
+/** Keep only numbers and codec names the runner measured. Never fill in 720p. */
+export function mediaFacts(input: MediaFacts | undefined): MediaFacts {
+  if (!input) return {};
+  const out: MediaFacts = {};
+  if (typeof input.width === "number" && input.width > 0 && input.width < 10000) out.width = Math.round(input.width);
+  if (typeof input.height === "number" && input.height > 0 && input.height < 10000) out.height = Math.round(input.height);
+  if (typeof input.fps === "number" && input.fps > 0 && input.fps < 240) out.fps = Math.round(input.fps * 1000) / 1000;
+  if (typeof input.vcodec === "string" && CODEC.test(input.vcodec)) out.vcodec = input.vcodec;
+  if (typeof input.acodec === "string" && CODEC.test(input.acodec)) out.acodec = input.acodec;
+  return out;
 }
 
 async function readJob(bucket: JobBucket, v: string): Promise<FullJob | null> {
@@ -122,13 +146,23 @@ async function budget(bucket: JobBucket, now: number): Promise<{ key: string; us
   return { key, used };
 }
 
-export async function enqueue(bucket: JobBucket, v: string, now: number, runner: FullJob["runner"]): Promise<{ status: number; job: FullJob }> {
+export async function enqueue(bucket: JobBucket, v: string, now: number, runner: FullJob["runner"], origin: JobOrigin = "legacy"): Promise<{ status: number; job: FullJob }> {
   const ready = await bucket.get(readyKey(v));
   if (ready) {
-    const job = (await readJob(bucket, v)) ?? fresh(v, now, runner);
+    const job = (await readJob(bucket, v)) ?? fresh(v, now, runner, origin);
     return { status: 200, job: { ...job, status: "ready", runner, updated: now } };
   }
   const existing = await readJob(bucket, v);
+  if (existing && origin === "manual" && existing.origin !== "manual" && (existing.status === "queued" || existing.status === "failed")) {
+    existing.origin = "manual";
+    existing.status = "queued";
+    existing.updated = now;
+    existing.runner = runner;
+    existing.error = undefined;
+    if (existing.attempts >= MAX_ATTEMPTS) existing.attempts = 0;
+    await writeJob(bucket, existing);
+    return { status: 200, job: existing };
+  }
   if (existing && (existing.status === "queued" || existing.status === "running" || existing.status === "ready" || existing.status === "refused")) {
     return { status: 200, job: { ...existing, runner } };
   }
@@ -137,15 +171,16 @@ export async function enqueue(bucket: JobBucket, v: string, now: number, runner:
   }
   const cap = await budget(bucket, now);
   if (!existing && cap.used >= DAILY_NEW) {
-    const job = fresh(v, now, runner);
+    const job = fresh(v, now, runner, origin);
     job.status = "failed";
     job.error = "daily-cap";
     return { status: 429, job };
   }
-  const job = existing ?? fresh(v, now, runner);
+  const job = existing ?? fresh(v, now, runner, origin);
   job.status = "queued";
   job.updated = now;
   job.runner = runner;
+  job.origin = existing?.origin ?? origin;
   job.error = undefined;
   await writeJob(bucket, job);
   if (!existing) await bucket.put(cap.key, JSON.stringify({ new: cap.used + 1 }), { httpMetadata: { contentType: "application/json" } });
@@ -163,8 +198,9 @@ export async function claim(bucket: JobBucket, now: number): Promise<FullJob | n
     if (job) jobs.push(job);
   }
   jobs.sort((a, b) => a.created - b.created);
-  const queued = jobs.find((j) => j.status === "queued" && j.attempts < MAX_ATTEMPTS);
-  const stale = jobs.find((j) => j.status === "running" && now - j.updated > STALE_MS && j.attempts < MAX_ATTEMPTS);
+  const manual = (j: FullJob) => j.origin === "manual";
+  const queued = jobs.find((j) => manual(j) && j.status === "queued" && j.attempts < MAX_ATTEMPTS);
+  const stale = jobs.find((j) => manual(j) && j.status === "running" && now - j.updated > STALE_MS && j.attempts < MAX_ATTEMPTS);
   const job = queued ?? stale;
   if (!job) return null;
   if (job.status === "queued") job.attempts += 1;
@@ -188,11 +224,12 @@ export async function report(
   v: string,
   outcome: "ready" | "refused" | "failed",
   now: number,
-  detail: { bytes?: number; duration?: number; error?: string },
+  detail: { bytes?: number; duration?: number; error?: string } & MediaFacts,
 ): Promise<{ status: number; job: FullJob }> {
-  const job = (await readJob(bucket, v)) ?? fresh(v, now, "configured");
+  const job = (await readJob(bucket, v)) ?? fresh(v, now, "configured", "manual");
   job.updated = now;
   job.runner = "configured";
+  const facts = mediaFacts(detail);
   if (outcome === "ready") {
     const head = await bucket.head(mediaKey(v));
     const reason = acceptReady(head?.size ?? null, detail.bytes ?? NaN, detail.duration ?? NaN);
@@ -202,7 +239,7 @@ export async function report(
       await writeJob(bucket, job);
       return { status: 409, job };
     }
-    const rec: ReadyRecord = { v, verified: true, bytes: detail.bytes!, duration: detail.duration!, url: fullMediaUrl(v) };
+    const rec: ReadyRecord = { v, verified: true, bytes: detail.bytes!, duration: detail.duration!, url: fullMediaUrl(v), ...facts };
     if (rec.url.includes("/clips/")) {
       job.status = "failed";
       job.error = "clip-url";
@@ -215,6 +252,7 @@ export async function report(
     job.status = "ready";
     job.bytes = rec.bytes;
     job.duration = rec.duration;
+    Object.assign(job, facts);
     job.error = undefined;
     await writeJob(bucket, job);
     return { status: 200, job };
@@ -281,7 +319,7 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
   }
   if (url.pathname === "/full/upload/complete") {
     if (req.method !== "POST") return json({ error: "method" }, 405, headers);
-    let body: { v?: unknown; uploadId?: unknown; parts?: unknown; bytes?: unknown; duration?: unknown };
+    let body: { v?: unknown; uploadId?: unknown; parts?: unknown; bytes?: unknown; duration?: unknown; width?: unknown; height?: unknown; fps?: unknown; vcodec?: unknown; acodec?: unknown };
     try {
       body = (await req.json()) as typeof body;
     } catch {
@@ -302,7 +340,15 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
     const saved = session ? (JSON.parse(await session.text()) as { uploadId?: string }) : {};
     if (saved.uploadId !== uploadId) return json({ error: "unknown-upload" }, 409, headers);
     await bucket.completeMultipart(mediaKey(v), uploadId, parts);
-    const result = await report(bucket, v, "ready", opts.now, { bytes, duration: typeof body.duration === "number" ? body.duration : undefined });
+    const result = await report(bucket, v, "ready", opts.now, {
+      bytes,
+      duration: typeof body.duration === "number" ? body.duration : undefined,
+      width: typeof body.width === "number" ? body.width : undefined,
+      height: typeof body.height === "number" ? body.height : undefined,
+      fps: typeof body.fps === "number" ? body.fps : undefined,
+      vcodec: typeof body.vcodec === "string" ? body.vcodec : undefined,
+      acodec: typeof body.acodec === "string" ? body.acodec : undefined,
+    });
     return json(result.job, result.status, headers);
   }
   if (url.pathname === "/full/claim") {
@@ -314,7 +360,7 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
     if (!opts.secret) return json({ error: "runner-not-configured" }, 503, headers);
     if (!authed) return json({ error: "unauthorized" }, 401, headers);
     if (req.method !== "POST") return json({ error: "method" }, 405, headers);
-    let body: { v?: unknown; outcome?: unknown; bytes?: unknown; duration?: unknown; error?: unknown };
+    let body: { v?: unknown; outcome?: unknown; bytes?: unknown; duration?: unknown; error?: unknown; width?: unknown; height?: unknown; fps?: unknown; vcodec?: unknown; acodec?: unknown };
     try {
       body = (await req.json()) as typeof body;
     } catch {
@@ -327,6 +373,11 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
       bytes: typeof body.bytes === "number" ? body.bytes : undefined,
       duration: typeof body.duration === "number" ? body.duration : undefined,
       error: typeof body.error === "string" ? body.error : undefined,
+      width: typeof body.width === "number" ? body.width : undefined,
+      height: typeof body.height === "number" ? body.height : undefined,
+      fps: typeof body.fps === "number" ? body.fps : undefined,
+      vcodec: typeof body.vcodec === "string" ? body.vcodec : undefined,
+      acodec: typeof body.acodec === "string" ? body.acodec : undefined,
     });
     return json(result.job, result.status, headers);
   }
@@ -338,7 +389,7 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
       try {
         const rec = JSON.parse(await ready.text()) as ReadyRecord;
         if (rec.verified && rec.v === v && !rec.url.includes("/clips/") && rec.bytes >= MIN_FULL_BYTES && rec.duration >= MIN_FULL_SECONDS) {
-          return json({ ...(await readJob(bucket, v)), v, status: "ready", bytes: rec.bytes, duration: rec.duration, url: fullMediaUrl(v), runner }, 200, headers);
+          return json({ ...(await readJob(bucket, v)), ...rec, v, status: "ready", url: fullMediaUrl(v), runner }, 200, headers);
         }
       } catch {
         /* ignore a broken record and fall through to the job */
@@ -348,7 +399,7 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
     return json(job ? { ...job, runner } : { v, status: "unknown", runner }, 200, headers);
   }
   if (url.pathname === "/full/jobs" && req.method === "POST") {
-    let body: { v?: unknown; url?: unknown };
+    let body: { v?: unknown; url?: unknown; origin?: unknown };
     try {
       body = (await req.json()) as typeof body;
     } catch {
@@ -357,7 +408,13 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
     if ("url" in body) return json({ error: "id-only" }, 400, headers);
     const v = youtubeOnly(body.v);
     if (!v) return json({ error: "bad-video" }, 400, headers);
-    const result = await enqueue(bucket, v, opts.now, runner);
+    if (body.origin !== "manual") {
+      const ready = await bucket.get(readyKey(v));
+      const existing = await readJob(bucket, v);
+      if (ready) return json({ ...(existing ?? { v }), v, status: "ready", runner }, 200, headers);
+      return json(existing ? { ...existing, runner } : { v, status: "unknown", runner }, 200, headers);
+    }
+    const result = await enqueue(bucket, v, opts.now, runner, "manual");
     return json(result.job, result.status, headers);
   }
   return json({ error: "not-found" }, 404, headers);

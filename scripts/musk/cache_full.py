@@ -53,6 +53,27 @@ def ffprobe_duration(path: str) -> float:
     return float(out.strip())
 
 
+# Small-window default. Prefer H.264 + AAC in an MP4 at or below 720p and 30fps.
+# The sort still picks the best match inside that cap. Nothing is upscaled.
+# If the source has no stream at or below 720p, the last branches take the
+# closest taller MP4. ffprobe records that real size. There is no --recode-video.
+MANUAL_FORMAT = (
+    "bv*[height<=720][fps<=30][vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]"
+    "/bv*[height<=720][fps<=30][vcodec^=avc1]+ba[acodec^=mp4a]"
+    "/bv*[height<=720][ext=mp4]+ba[ext=m4a]"
+    "/b[height<=720][ext=mp4]"
+    "/bv*[height>720][vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]"
+    "/b[height>720][ext=mp4]"
+)
+
+
+def run_mode(argv: list[str]) -> str:
+    """The bulk loop stays paused. Only an explicit --manual run claims pasted-link jobs."""
+    if "--manual" not in argv:
+        return "paused"
+    return "manual-loop" if "--loop" in argv else "manual-once"
+
+
 def ytdlp_command(video_id: str, target: str) -> list[str]:
     return [
         "yt-dlp",
@@ -61,11 +82,43 @@ def ytdlp_command(video_id: str, target: str) -> list[str]:
         "--retries",
         "2",
         "-f",
-        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
+        MANUAL_FORMAT,
+        "-S",
+        "res:720,fps:30,vcodec:h264,acodec:aac,ext:mp4",
+        "--merge-output-format",
+        "mp4",
+        "--postprocessor-args",
+        "Merger+ffmpeg:-c copy -movflags +faststart",
         "-o",
         target,
         f"https://www.youtube.com/watch?v={video_id}",
     ]
+
+
+def probe_media(path: str) -> dict:
+    """Measured picture. Missing fields stay missing; this never fills in 720p."""
+    out = subprocess.check_output(
+        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name,width,height,avg_frame_rate", "-of", "json", path],
+        text=True,
+    )
+    data = json.loads(out)
+    info: dict = {}
+    for stream in data.get("streams") or []:
+        if stream.get("codec_type") == "video" and "height" not in info:
+            if stream.get("codec_name"):
+                info["vcodec"] = stream["codec_name"]
+            if isinstance(stream.get("width"), int):
+                info["width"] = stream["width"]
+            if isinstance(stream.get("height"), int):
+                info["height"] = stream["height"]
+            rate = str(stream.get("avg_frame_rate") or "")
+            if "/" in rate:
+                num, den = rate.split("/", 1)
+                if num.isdigit() and den.isdigit() and int(den) > 0:
+                    info["fps"] = round(int(num) / int(den), 3)
+        elif stream.get("codec_type") == "audio" and "acodec" not in info and stream.get("codec_name"):
+            info["acodec"] = stream["codec_name"]
+    return info
 
 
 def worker_request(url: str, secret: str, method: str, data: bytes | None, content_type: str | None, timeout: int) -> dict:
@@ -93,7 +146,7 @@ def put_part(url: str, secret: str, video_id: str, upload_id: str, part: int, ch
     return worker_request(target, secret, "PUT", chunk, None, 300)["etag"]
 
 
-def upload_via_worker(worker: str, secret: str, video_id: str, path: str, size: int, duration: float) -> dict:
+def upload_via_worker(worker: str, secret: str, video_id: str, path: str, size: int, duration: float, media: dict | None = None) -> dict:
     """Authenticated multipart upload through the Worker R2 binding. The R2 credential stays on the Worker."""
     base = worker.rstrip("/")
     opened = post(base + "/full/upload/start", secret, {"v": video_id})
@@ -112,7 +165,7 @@ def upload_via_worker(worker: str, secret: str, video_id: str, path: str, size: 
     return post(
         base + "/full/upload/complete",
         secret,
-        {"v": video_id, "uploadId": upload_id, "parts": parts, "bytes": size, "duration": duration},
+        {"v": video_id, "uploadId": upload_id, "parts": parts, "bytes": size, "duration": duration, **(media or {})},
     )
 
 
@@ -140,18 +193,22 @@ def run_once(worker: str, secret: str) -> int:
             duration = ffprobe_duration(target)
         except (subprocess.CalledProcessError, ValueError):
             duration = 0
+        try:
+            media = probe_media(target)
+        except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError):
+            media = {}
         if size < MIN_BYTES or duration < MIN_SECONDS:
-            post(worker.rstrip("/") + "/full/result", secret, {"v": video_id, "outcome": "failed", "bytes": size, "duration": duration, "error": "not-a-full-video"})
+            post(worker.rstrip("/") + "/full/result", secret, {"v": video_id, "outcome": "failed", "bytes": size, "duration": duration, "error": "not-a-full-video", **media})
             print(f"rejected size={size} duration={duration}")
             return 3
         try:
-            upload_via_worker(worker, secret, video_id, target, size, duration)
+            upload_via_worker(worker, secret, video_id, target, size, duration, media)
         except Exception as exc:
             post(worker.rstrip("/") + "/full/result", secret, {"v": video_id, "outcome": "failed", "error": str(exc)[:180]})
             print(exc)
             return 4
-        post(worker.rstrip("/") + "/full/result", secret, {"v": video_id, "outcome": "ready", "bytes": size, "duration": duration})
-        print(f"ready {video_id} bytes={size} duration={duration}")
+        post(worker.rstrip("/") + "/full/result", secret, {"v": video_id, "outcome": "ready", "bytes": size, "duration": duration, **media})
+        print(f"ready {video_id} bytes={size} duration={duration} height={media.get('height')} vcodec={media.get('vcodec')}")
         return 0
 
 
@@ -161,13 +218,22 @@ def main() -> int:
     if not worker or not secret:
         print("CACHE_WORKER_URL and CACHE_JOB_SECRET are required. This script does not download without them.", file=sys.stderr)
         return 1
+    mode = run_mode(sys.argv)
+    if mode == "paused":
+        print(
+            "Bulk cache stays paused. This process does not claim queued jobs. "
+            "After the Worker that only claims origin=manual is deployed, a later start is: "
+            "python3 cache_full.py --manual   or   python3 cache_full.py --manual --loop. "
+            "Leave pipeline.stop and USER_PAUSED in place.",
+            file=sys.stderr,
+        )
+        return 0
     if shutil.which("yt-dlp") is None or shutil.which("ffprobe") is None:
         print("yt-dlp and ffprobe must be installed on the machine that runs this.", file=sys.stderr)
         return 1
-    loop = "--loop" in sys.argv
     while True:
         code = run_once(worker, secret)
-        if not loop:
+        if mode != "manual-loop":
             return code
         time.sleep(60 if code == 0 else 30)
 

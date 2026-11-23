@@ -18,6 +18,10 @@ export interface CacheView {
   duration?: number;
   url?: string;
   error?: string;
+  height?: number;
+  fps?: number;
+  vcodec?: string;
+  acodec?: string;
 }
 
 const JOB_KEY = "musk-atlas:full-job:v1";
@@ -98,7 +102,18 @@ function viewFrom(raw: Partial<CacheView> & { v?: string }, fallback: string): C
     duration: raw.duration,
     url: verified ? fullMediaUrl(v) : undefined,
     error: raw.error,
+    height: typeof raw.height === "number" ? raw.height : undefined,
+    fps: typeof raw.fps === "number" ? raw.fps : undefined,
+    vcodec: typeof raw.vcodec === "string" ? raw.vcodec : undefined,
+    acodec: typeof raw.acodec === "string" ? raw.acodec : undefined,
   };
+}
+
+function picture(view: CacheView): string {
+  if (!view.height) return "";
+  const codecs = [view.vcodec, view.acodec].filter(Boolean).join("/");
+  const note = view.height > 720 ? "，来源没有 720p 及以下的成片" : "";
+  return `实际 ${view.height}p${view.fps ? ` ${view.fps}fps` : ""}${codecs ? ` ${codecs}` : ""}${note}`;
 }
 
 export function cacheStatusLine(view: CacheView | null, playingLocal: boolean): string {
@@ -107,12 +122,15 @@ export function cacheStatusLine(view: CacheView | null, playingLocal: boolean): 
     if (view?.runner === "unreachable") return "缓存服务还没接上，先用在线。不会从这台设备选文件。";
     return "这节课还没有整段缓存，先用在线。";
   }
-  if (view.status === "ready" && view.verified) return "整段已缓存。这次继续在线，下次打开用本地。";
   if (view.status === "queued" && view.runner === "missing") return "已记下这节课。下载机还没接上，先用在线。";
-  if (view.status === "queued") return "已排队缓存整段，先用在线。";
-  if (view.status === "running") return "正在下载整段，先用在线。";
+  if (view.status === "queued") return "已排队。目标不超过 720p、优先 30 帧的 H.264/AAC。先用在线。";
+  if (view.status === "running") return "正在下载整段。先用在线。";
   if (view.status === "refused") return "YouTube 拒绝了下载。先用在线。不会绕过这个检查。";
   if (view.error === "daily-cap") return "今天的缓存额度用完了，先用在线。";
+  if (view.status === "ready" && view.verified) {
+    const seen = picture(view);
+    return seen ? `整段已缓存，${seen}。这次继续在线，下次打开用本地。` : "整段已缓存。这次继续在线，下次打开用本地。";
+  }
   return "缓存没有做成，已停止重试。先用在线。";
 }
 
@@ -141,7 +159,7 @@ export async function enqueueFullCache(v: string, fetchImpl: typeof fetch = fetc
     const res = await fetchImpl(`${TTS_URL}/full/jobs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ v }),
+      body: JSON.stringify({ v, origin: "manual" }),
     });
     const view = await readBody(res, v);
     rememberJob(view);
