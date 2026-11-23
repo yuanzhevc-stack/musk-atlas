@@ -6,6 +6,8 @@ After=network-online.target
 Type=simple
 WorkingDirectory=/workspace/musk-corpus
 EnvironmentFile=/workspace/musk-corpus/cache-full.env
+# Do not enable this unit. `cache_full.py` without --manual now exits without claiming.
+# A later manual consumer is: python3 cache_full.py --manual --loop
 ExecStart=/usr/bin/python3 /workspace/musk-corpus/cache_full.py --loop
 Restart=on-failure
 RestartSec=30

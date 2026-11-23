@@ -71,16 +71,16 @@ test("only an 11-character youtube id is accepted", () => {
 
 test("enqueue dedups, caps the day, and does not retry a refusal", async () => {
   const b = bucket();
-  const first = await enqueue(b, id, 1_000, "missing");
+  const first = await enqueue(b, id, 1_000, "missing", "manual");
   assert.equal(first.status, 200);
   assert.equal(first.job.status, "queued");
-  const again = await enqueue(b, id, 2_000, "missing");
+  const again = await enqueue(b, id, 2_000, "missing", "manual");
   assert.equal(again.job.created, first.job.created);
   const day = new Date(1_000).toISOString().slice(0, 10);
   const budget = JSON.parse(b.store.get(`full/_budget/${day}.json`)!);
   assert.equal(budget.new, 1);
   await report(b, id, "refused", 3_000, { error: "Sign in to confirm you’re not a bot" });
-  const kept = await enqueue(b, id, 4_000, "configured");
+  const kept = await enqueue(b, id, 4_000, "configured", "manual");
   assert.equal(kept.job.status, "refused");
   assert.equal(JSON.parse(b.store.get(`full/_budget/${day}.json`)!).new, 1);
 });
@@ -89,7 +89,7 @@ test("a fresh id past the daily cap is rejected and does not become ready", asyn
   const b = bucket();
   const day = new Date(10_000).toISOString().slice(0, 10);
   b.store.set(`full/_budget/${day}.json`, JSON.stringify({ new: DAILY_NEW }));
-  const res = await enqueue(b, "cdZZpaB2kDM", 10_000, "configured");
+  const res = await enqueue(b, "cdZZpaB2kDM", 10_000, "configured", "manual");
   assert.equal(res.status, 429);
   assert.equal(res.job.error, "daily-cap");
   assert.equal(b.store.has("full/jobs/cdZZpaB2kDM.json"), false);
@@ -97,7 +97,7 @@ test("a fresh id past the daily cap is rejected and does not become ready", asyn
 
 test("claim is secret-only and stops after two attempts", async () => {
   const b = bucket();
-  await enqueue(b, id, 1_000, "configured");
+  await enqueue(b, id, 1_000, "configured", "manual");
   assert.equal(bearerOk("Bearer no", secret), false);
   assert.equal(bearerOk("Bearer " + secret, ""), false);
   const open = await handleFullCache(new Request("https://worker.test/full/claim", { method: "POST" }), b, headers, { secret, now: 2_000 });
@@ -117,7 +117,7 @@ test("claim is secret-only and stops after two attempts", async () => {
 
 test("ready requires the real object, not a sentence clip", async () => {
   const b = bucket();
-  await enqueue(b, "cdZZpaB2kDM", 1_000, "configured");
+  await enqueue(b, "cdZZpaB2kDM", 1_000, "configured", "manual");
   await claim(b, 2_000);
   assert.equal(acceptReady(135960, 135960, 6.28), "too-small");
   assert.equal(acceptReady(6_900_000, 6_900_000, 6), "too-short");
@@ -173,6 +173,54 @@ test("a secret-backed upload can finish a full object and stays closed without t
   assert.equal(done.status, 200);
   assert.equal((await done.json()).status, "ready");
   assert.equal(b.store.has(`full/ready/${id}.json`), true);
+});
+
+test("claim leaves an older unmarked job and takes the pasted link", async () => {
+  const b = bucket();
+  b.store.set(
+    "full/jobs/bbbbbbbbbbb.json",
+    JSON.stringify({ v: "bbbbbbbbbbb", status: "queued", attempts: 0, maxAttempts: 2, created: 1, updated: 1, runner: "configured" }),
+  );
+  await enqueue(b, id, 5_000, "configured", "manual");
+  const claimed = await claim(b, 6_000);
+  assert.equal(claimed?.v, id);
+  assert.equal(claimed?.origin, "manual");
+  const legacy = JSON.parse(b.store.get("full/jobs/bbbbbbbbbbb.json")!);
+  assert.equal(legacy.status, "queued");
+});
+
+test("a post without the manual mark does not create a job", async () => {
+  const b = bucket();
+  const res = await handleFullCache(
+    new Request("https://worker.test/full/jobs", { method: "POST", body: JSON.stringify({ v: id }) }),
+    b,
+    headers,
+    { secret: "", now: 1_000 },
+  );
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, "unknown");
+  assert.equal(b.store.has(`full/jobs/${id}.json`), false);
+  const manual = await handleFullCache(
+    new Request("https://worker.test/full/jobs", { method: "POST", body: JSON.stringify({ v: id, origin: "manual" }) }),
+    b,
+    headers,
+    { secret: "", now: 2_000 },
+  );
+  assert.equal((await manual.json()).origin, "manual");
+});
+
+test("a ready report keeps the measured picture and does not invent 720p", async () => {
+  const b = bucket();
+  await enqueue(b, id, 1_000, "configured", "manual");
+  await claim(b, 2_000);
+  b.sizes.set(`full/${id}.mp4`, MIN_FULL_BYTES);
+  const ok = await report(b, id, "ready", 3_000, { bytes: MIN_FULL_BYTES, duration: 114, height: 1080, fps: 30, vcodec: "h264", acodec: "aac" });
+  assert.equal(ok.job.height, 1080);
+  assert.equal(ok.job.fps, 30);
+  assert.equal(ok.job.vcodec, "h264");
+  const rec = JSON.parse(b.store.get(`full/ready/${id}.json`)!);
+  assert.equal(rec.height, 1080);
+  assert.equal(rec.height === 720, false);
 });
 
 test("the public enqueue route rejects an arbitrary url", async () => {

@@ -558,12 +558,7 @@ export function VideoStudy({
   phaseRef.current = phase;
   useEffect(() => {
     let stop = false;
-    let posted = false;
     const tick = async () => {
-      if (!posted) {
-        posted = true;
-        await enqueueFullCache(yt.v);
-      }
       const next = await readFullCache(yt.v);
       if (stop) return;
       setJob(next);
@@ -758,7 +753,14 @@ export function VideoStudy({
           </label>
           <button type="button" className={pauseAfter ? "is-on" : ""} aria-pressed={pauseAfter} onClick={() => setPauseAfter((v) => !v)} data-testid="desk-pause"><RotateCcw size={18} /><span>单句暂停</span></button>
         </div>
-        <p className="desk-cache" hidden data-testid={playingCache && phase !== "error" ? "vs-local-name" : "vs-cache-status"}>{cacheLine}</p>
+        {!playingCache && job && (job.status !== "unknown" || job.runner === "unreachable") && (
+          <p className="desk-cache" data-testid={phase === "error" ? "vs-local-name" : "vs-cache-status"}>
+            {cacheLine}
+            {job.runner === "unreachable" || job.status === "unknown" ? (
+              <button type="button" onClick={() => void enqueueFullCache(yt.v).then(setJob)}>再试一次</button>
+            ) : null}
+          </p>
+        )}
         <div className="desk-sheet" onClick={(e) => { if ((e.target as HTMLElement).closest(REPLAY_BLOCKED)) return; replay(); }}>
         {lines[cur] && mode !== "cards" && mode !== "cloze" && !(mode === "zh2en" && !revealed) && !(mode === "dictation" && !revealed) && (
           <div className="vs-now" data-testid="vs-now" data-sid={cur}>
