@@ -56,6 +56,39 @@ export async function fetchCaptions(v: string): Promise<Captions> {
 
 const NOISE = /^[[(（][^\])）]{0,40}[\])）]$/; // [Music] (Laughter) (Applause)
 
+const BRAND: Record<string, string> = {
+  spacex: "SpaceX",
+  starlink: "Starlink",
+  starship: "Starship",
+  tesla: "Tesla",
+  paypal: "PayPal",
+  youtube: "YouTube",
+  openai: "OpenAI",
+  neuralink: "Neuralink",
+  twitter: "Twitter",
+  cybertruck: "Cybertruck",
+  elon: "Elon",
+  musk: "Musk",
+};
+const ACRONYM = new Set(["ai", "nasa", "ceo", "cfo", "cto", "coo", "ipo", "fbi", "cia", "gdp", "ufo", "phd"]);
+
+/** All-caps captions become sentence case. A line that already has normal case is left alone. */
+export function sentenceCase(text: string): string {
+  const letters = text.match(/[A-Za-z]/g) ?? [];
+  if (letters.length < 2) return text;
+  const uppers = letters.filter((ch) => ch >= "A" && ch <= "Z").length;
+  if (uppers / letters.length < 0.75) return text;
+  let start = true;
+  return text.replace(/[A-Za-z]+(?:'[A-Za-z]+)?/g, (word) => {
+    const lower = word.toLowerCase();
+    let next = BRAND[lower] ?? (ACRONYM.has(lower) ? lower.toUpperCase() : lower);
+    if (next === lower && (/^i$/.test(lower) || /^i'(m|ve|d|ll|re)$/.test(lower))) next = "I" + lower.slice(1);
+    if (next === lower && start) next = lower.charAt(0).toUpperCase() + lower.slice(1);
+    start = false;
+    return next;
+  });
+}
+
 /** Break one caption into sentences. A line never crosses a caption boundary. */
 export function splitSpeech(text: string): string[] {
   return splitSentences(text.trim()).map((line) => line.trim()).filter(Boolean);
@@ -73,7 +106,7 @@ export function speechLines(segs: [number, number, string][]): { text: string; m
     const total = weights.reduce((sum, n) => sum + n, 0) || 1;
     let used = 0;
     parts.forEach((part, i) => {
-      lines.push({ text: part, ms: ms + (duration * used) / total });
+      lines.push({ text: sentenceCase(part), ms: ms + (duration * used) / total });
       used += weights[i];
     });
   }

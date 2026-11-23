@@ -23,19 +23,28 @@ test("spoken lines stay inside their caption and do not share one start time", a
     [17000, 8000, "MERGER OF SPACEX AND TESLA, AND RELATES TO THE IDEA THAT AT TESLA, YOU HAVE A PAY AWARD THAT'S TIED TO OPERATING"],
   ];
   const lines = speechLines(segs);
-  assert.equal(lines[0].text.endsWith("FUTURE."), true);
+  assert.equal(lines[0].text.endsWith("future."), true);
+  assert.equal(lines[0].text.startsWith("So many"), true);
   assert.equal(lines[0].ms, 0);
   assert.ok(lines[1].ms >= 10000);
   assert.ok(lines.every((line, i) => i === 0 || line.ms > lines[i - 1].ms));
-  assert.equal(lines.some((line) => line.text.includes("MERGER") && line.ms < 17000), false);
+  assert.equal(lines.some((line) => /merger/i.test(line.text) && line.ms < 17000), false);
   const lesson = captionsToLesson({ v: "abcdefghijk", title: "", author: "", lang: "en", kind: "manual", segs });
   assert.equal(lesson.times.length, parse(lesson.text).sentences.length);
   assert.equal(lesson.times.length, lesson.text.split(/\n+/).filter((line) => line.trim()).length);
   assert.ok(lesson.times[1] >= 10);
   const sentences = parse(lesson.text).sentences;
-  const merger = sentences.findIndex((line) => line.includes("MERGER"));
+  const merger = sentences.findIndex((line) => /merger/i.test(line));
   assert.ok(merger > 0);
   assert.ok(lesson.times[merger] >= 17);
+});
+
+test("all-caps captions become sentence case and normal captions stay", async () => {
+  const { sentenceCase } = await import("./youtube.ts");
+  assert.equal(sentenceCase("SO MANY AREAS OF CONVERGENCE."), "So many areas of convergence.");
+  assert.equal(sentenceCase("I DON'T THINK I SHOULD BE COMPENSATED."), "I don't think I should be compensated.");
+  assert.equal(sentenceCase("MERGER OF SPACEX AND TESLA."), "Merger of SpaceX and Tesla.");
+  assert.equal(sentenceCase("Elon already wrote this in normal case."), "Elon already wrote this in normal case.");
 });
 
 test("caption errors stay specific when YouTube blocks the fetch", async () => {
