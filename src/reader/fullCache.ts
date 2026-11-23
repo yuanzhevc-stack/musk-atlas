@@ -112,8 +112,7 @@ function viewFrom(raw: Partial<CacheView> & { v?: string }, fallback: string): C
 function picture(view: CacheView): string {
   if (!view.height) return "";
   const codecs = [view.vcodec, view.acodec].filter(Boolean).join("/");
-  const note = view.height > 720 ? "，来源没有 720p 及以下的成片" : "";
-  return `实际 ${view.height}p${view.fps ? ` ${view.fps}fps` : ""}${codecs ? ` ${codecs}` : ""}${note}`;
+  return `实际 ${view.height}p${view.fps ? ` ${view.fps}fps` : ""}${codecs ? ` ${codecs}` : ""}`;
 }
 
 export function cacheStatusLine(view: CacheView | null, playingLocal: boolean): string {

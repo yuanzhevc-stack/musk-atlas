@@ -55,9 +55,10 @@ test("enqueue sends only the video id and keeps a refusal", async () => {
   assert.equal(view.verified, false);
   assert.equal(view.status, "refused");
   assert.match(cacheStatusLine(view, false), /拒绝了下载/);
-  assert.match(cacheStatusLine({ ...view, status: "ready", verified: true, bytes: 8_000_000, duration: 600, height: 1080, fps: 30, vcodec: "h264", acodec: "aac" }, false), /1080p/);
-  assert.equal(cacheStatusLine({ ...view, status: "ready", verified: true, bytes: 8_000_000, duration: 600, height: 1080, vcodec: "h264" }, false).includes("720p 及以下"), true);
-  assert.equal(/实际 720p/.test(cacheStatusLine({ ...view, status: "ready", verified: true, bytes: 8_000_000, duration: 600, height: 1080 }, false)), false);
+  const measured = cacheStatusLine({ ...view, status: "ready", verified: true, bytes: 8_000_000, duration: 600, height: 1080, fps: 30, vcodec: "h264", acodec: "aac" }, false);
+  assert.match(measured, /1080p/);
+  assert.equal(measured.includes("没有 720p"), false);
+  assert.equal(measured.includes("实际 720p"), false);
   assert.equal(/选择文件|上传/.test(cacheStatusLine(view, false)), false);
 });
 

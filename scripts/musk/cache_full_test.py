@@ -8,7 +8,7 @@ from unittest import mock
 
 import cache_full
 import seed_full
-from cache_full import APP_USER_AGENT, MANUAL_FORMAT, WORKER_HOST, classify_ytdlp, post, put_part, run_mode, upload_via_worker, worker_request, ytdlp_command
+from cache_full import APP_USER_AGENT, MANUAL_FORMAT, WORKER_HOST, classify_ytdlp, post, put_part, run_mode, upload_via_worker, worker_is_manual_720, worker_request, ytdlp_command
 
 SECRET = "unit-secret-not-real"
 BASE = f"https://{WORKER_HOST}"
@@ -87,6 +87,8 @@ class WorkerClient(unittest.TestCase):
         self.assertEqual(command[0], "yt-dlp")
         self.assertIn(MANUAL_FORMAT, command)
         self.assertIn("height<=720", MANUAL_FORMAT)
+        self.assertNotIn("height>720", MANUAL_FORMAT)
+        self.assertNotIn("height>720", joined)
         self.assertIn("fps<=30", MANUAL_FORMAT)
         self.assertIn("vcodec^=avc1", MANUAL_FORMAT)
         self.assertIn("acodec^=mp4a", MANUAL_FORMAT)
@@ -100,6 +102,13 @@ class WorkerClient(unittest.TestCase):
         self.assertNotIn("Mozilla", joined)
         self.assertNotIn(APP_USER_AGENT, joined)
         self.assertIn("https://www.youtube.com/watch?v=s9mczdODqzo", command)
+
+    def test_old_worker_handshake_is_closed(self):
+        self.assertTrue(worker_is_manual_720({"scope": "manual-only", "maxHeight": 720, "policy": "lte-720", "preferFps": 30}))
+        self.assertFalse(worker_is_manual_720({}))
+        self.assertFalse(worker_is_manual_720({"error": "not-found"}))
+        self.assertFalse(worker_is_manual_720({"scope": "manual-only", "maxHeight": 1080, "policy": "lte-720"}))
+        self.assertFalse(worker_is_manual_720("manual-only"))
 
     def test_plain_startup_does_not_claim(self):
         self.assertEqual(run_mode(["cache_full.py"]), "paused")
