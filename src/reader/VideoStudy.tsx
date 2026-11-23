@@ -7,7 +7,7 @@ import { normalize, phraseIndex, reader } from "./model";
 import { ecdict, translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
 import { saveChoice, type SourceChoice } from "./hostedLesson";
-import { adoptReady, cacheStatusLine, enqueueFullCache, forgetReady, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, type CacheView } from "./fullCache";
+import { adoptReady, cacheStatusLine, forgetReady, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
 import { DESK_MODES, MODE_LABEL, dragPhrase, holdSentence, keptCaption, loopDecision, loopRange, nextSpeed, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, showsChinese, type DeskMode, type RowDisclosure } from "./lessonDesk";
 import { LessonPractice } from "./LessonPractice";
 import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAudio";
@@ -756,8 +756,8 @@ export function VideoStudy({
         {!playingCache && job && (job.status !== "unknown" || job.runner === "unreachable") && (
           <p className="desk-cache" data-testid={phase === "error" ? "vs-local-name" : "vs-cache-status"}>
             {cacheLine}
-            {job.runner === "unreachable" || job.status === "unknown" ? (
-              <button type="button" onClick={() => void enqueueFullCache(yt.v).then(setJob)}>再试一次</button>
+            {job.runner === "unreachable" || job.status === "unknown" || (job.status === "failed" && job.error !== "retry-cap") ? (
+              <button type="button" data-testid="cache-retry" onClick={() => void retryFullCache(yt.v).then(setJob)}>再试一次</button>
             ) : null}
           </p>
         )}

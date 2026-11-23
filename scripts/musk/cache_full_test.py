@@ -8,7 +8,7 @@ from unittest import mock
 
 import cache_full
 import seed_full
-from cache_full import APP_USER_AGENT, MANUAL_FORMAT, WORKER_HOST, classify_ytdlp, post, put_part, run_mode, upload_via_worker, worker_is_manual_720, worker_request, ytdlp_command
+from cache_full import APP_USER_AGENT, MANUAL_FORMAT, WORKER_HOST, classify_ytdlp, dependency_problem, failure_code, post, put_part, run_mode, upload_via_worker, worker_is_manual_720, worker_request, ytdlp_command
 
 SECRET = "unit-secret-not-real"
 BASE = f"https://{WORKER_HOST}"
@@ -36,6 +36,11 @@ class Classify(unittest.TestCase):
     def test_other_errors_stay_failures(self):
         self.assertEqual(classify_ytdlp(1, "HTTP Error 404"), "failed")
         self.assertEqual(classify_ytdlp(0, ""), "downloaded")
+        self.assertEqual(failure_code("ERROR: [youtube] HTTP Error 403"), "http-403")
+        self.assertEqual(failure_code("ERROR: challenge solver requires yt-dlp-ejs"), "ejs-missing")
+        self.assertEqual(dependency_problem(ytdlp=True, ffmpeg=True, ffprobe=True, deno=True, ejs=False), "ejs-missing")
+        self.assertEqual(dependency_problem(ytdlp=True, ffmpeg=True, ffprobe=True, deno=False, ejs=True), "deno-missing")
+        self.assertIsNone(dependency_problem(ytdlp=True, ffmpeg=True, ffprobe=True, deno=True, ejs=True))
 
 
 class WorkerClient(unittest.TestCase):
