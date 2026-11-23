@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { centerScroll, followAllowed, isConfirmedMusk, lessonMedia, sentenceAt, sentenceSpan, shouldRecenter, sourcePlan, wordAt } from "./sync";
+import { centerScroll, followAllowed, isConfirmedMusk, lessonMedia, lyricScroll, sentenceAt, sentenceSpan, shouldRecenter, sourcePlan, wordAt } from "./sync";
 
 const times = [0, 1.2, 4, 4, 9];
 
@@ -48,6 +48,13 @@ test("only a confirmed voiceprint is Musk", () => {
   assert.equal(isConfirmedMusk("not_musk"), false);
   assert.equal(isConfirmedMusk(null), false);
   assert.equal(isConfirmedMusk(undefined), false);
+});
+
+test("lyrics keep the current line on the focus line and inside the pane", () => {
+  assert.equal(lyricScroll(200, 1000, 500, 40), 444);
+  assert.equal(lyricScroll(200, 1000, 0, 40), 0);
+  assert.equal(lyricScroll(200, 1000, 960, 40), 800);
+  assert.equal(lyricScroll(400, 400, 200, 40), 0);
 });
 
 test("transcript centers the current line and stays inside the pane", () => {

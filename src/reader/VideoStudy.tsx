@@ -12,9 +12,9 @@ import { DESK_MODES, MODE_LABEL, dragPhrase, holdSentence, keptCaption, loopDeci
 import { LessonPractice } from "./LessonPractice";
 import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAudio";
 import { readNote, writeNote } from "./lessonNotes";
-import { centerScroll, followAllowed, lessonMedia, sentenceAt, shouldRecenter } from "./sync";
+import { followAllowed, lessonMedia, lyricScroll, sentenceAt, shouldRecenter } from "./sync";
 import { YoutubePlayer, type PlayerHandle, type PlayerPhase } from "./YoutubePlayer";
-import { clockOf, watchUrl } from "./youtube";
+import { captionsToLesson, clockOf, fetchCaptions, watchUrl } from "./youtube";
 import { toast } from "../ui/Toast";
 
 type Sel = { from: number; to: number };
@@ -461,19 +461,20 @@ export function VideoStudy({
 
   const alignTo = (sid: number, mode: "force" | "follow") => {
     const list = listRef.current;
-    const row = list?.querySelector<HTMLElement>(`[data-vs="${sid}"]`);
+    const mark = list?.querySelector<HTMLElement>(`[data-vs="${sid}"]`);
+    const row = mark?.closest<HTMLElement>(".desk-row") ?? mark;
     if (!list || !row || list.clientHeight < 40) return;
     if (mode === "follow" && !followAllowed({ picking: picking.current, cardOpen: selRef.current != null, userHold: heldRef.current })) return;
     const itemTop = list.scrollTop + (row.getBoundingClientRect().top - list.getBoundingClientRect().top);
-    const next = centerScroll(list.clientHeight, list.scrollHeight, itemTop, row.offsetHeight);
+    const next = lyricScroll(list.clientHeight, list.scrollHeight, itemTop, row.offsetHeight);
     if (mode === "follow" && !shouldRecenter(list.scrollTop, next)) return;
     lastSet.current = next;
-    ignoreScrollUntil.current = performance.now() + 160;
+    ignoreScrollUntil.current = performance.now() + 720;
     programmatic.current = true;
-    list.scrollTop = next;
-    queueMicrotask(() => {
+    list.scrollTo({ top: next, behavior: "smooth" });
+    window.setTimeout(() => {
       programmatic.current = false;
-    });
+    }, 720);
   };
   useEffect(() => {
     const mode = alignMode.current;
@@ -508,6 +509,29 @@ export function VideoStudy({
     alignTo(curRef.current, "force");
   };
 
+  useEffect(() => {
+    let live = true;
+    const v = yt.v;
+    void fetchCaptions(v)
+      .then((c) => {
+        if (!live) return;
+        const next = captionsToLesson(c);
+        if (!next.text.trim() || !next.times.length) return;
+        const sameText = next.text === lesson.text;
+        const sameTimes = next.times.length === yt.times.length && next.times.every((t, i) => t === yt.times[i]);
+        if (sameText && sameTimes) return;
+        const at = clock.current > 0.2 ? clock.current : (timesRef.current[curRef.current] ?? 0);
+        reader.updateLesson(lesson.id, { text: next.text, yt: { ...yt, times: next.times, kind: c.kind, author: c.author ?? yt.author } });
+        setTr({});
+        setCur(sentenceAt(next.times, at));
+      })
+      .catch(() => {
+        /* keep the stored lesson if captions cannot be refreshed */
+      });
+    return () => {
+      live = false;
+    };
+  }, [lesson.id, yt.v]); // eslint-disable-line react-hooks/exhaustive-deps
   const onTime = (t: number) => {
     clock.current = t;
     const current = curRef.current;
@@ -675,7 +699,7 @@ export function VideoStudy({
     const hit = !!sel && line.tokens.length > 0 && sel.to >= line.tokens[0].i && sel.from <= line.tokens[line.tokens.length - 1].i;
     const disclosure = rowDisclosure(mode, revealed, line.sid === cur, inTranscript);
     return (
-      <div key={line.sid} className="desk-row">
+      <div key={line.sid} className={`desk-row${inTranscript && line.sid === cur ? " is-current" : ""}`}>
         {inTranscript && <span className="desk-num">{line.sid + 1}</span>}
         <SentRow
           sid={line.sid}
@@ -802,14 +826,18 @@ export function VideoStudy({
         </details>
         </div>
       </div>
+      <div className="desk-transcript">
+      <label className="desk-search">
+        <Search size={14} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索英文字幕" aria-label="搜索字幕" data-testid="transcript-search" />
+      </label>
       <div className="vs-subs" ref={listRef} role="list" aria-label="字幕" data-testid="vs-subs" onScroll={onListScroll}>
-        <label className="desk-search">
-          <Search size={14} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索英文字幕" aria-label="搜索字幕" data-testid="transcript-search" />
-        </label>
+        <div className="lyric-pad" aria-hidden="true" />
         {held && <button type="button" className="vs-return" onClick={backToCurrent} data-testid="vs-return">回到当前句</button>}
         {visible.map((line) => row(line, true))}
         {!visible.length && <p className="desk-empty">没有符合搜索的句子。</p>}
+        <div className="lyric-pad" aria-hidden="true" />
+      </div>
       </div>
       </div>
     </div>,

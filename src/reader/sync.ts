@@ -82,6 +82,17 @@ export function centerScroll(viewHeight: number, contentHeight: number, itemTop:
   return Math.max(0, Math.min(max, raw));
 }
 
+/**
+ * Scroll offset that places a row on the lyric focus line.
+ * Focus 0.38 keeps the current line above center, with the next lines still visible.
+ */
+export function lyricScroll(viewHeight: number, contentHeight: number, itemTop: number, itemHeight: number, focus = 0.38): number {
+  if (!(viewHeight > 0) || contentHeight <= viewHeight) return 0;
+  const raw = itemTop - viewHeight * focus + Math.min(itemHeight, viewHeight) / 2;
+  const max = Math.max(0, contentHeight - viewHeight);
+  return Math.max(0, Math.min(max, raw));
+}
+
 /** True when the pane should move. A line already near the center stays put. */
 export function shouldRecenter(current: number, target: number, slack = 28): boolean {
   return Math.abs(current - target) > slack;

@@ -55,70 +55,50 @@ export async function fetchCaptions(v: string): Promise<Captions> {
 }
 
 const NOISE = /^[[(（][^\])）]{0,40}[\])）]$/; // [Music] (Laughter) (Applause)
-const MAX_WORDS = 36;
 
-/** Captions -> lesson text (one sentence per line, blank line on long pauses) + per-sentence start seconds. */
-export function captionsToLesson(c: Captions) {
-  // One stream of text with a time for every character offset (start of the caption segment it came from).
-  let stream = "";
-  const marks: [number, number][] = []; // [charOffset, ms]
-  for (const [ms, , raw] of c.segs) {
-    const t = raw.replace(/\s+/g, " ").replace(/^>>\s*/, "").trim();
-    if (!t || NOISE.test(t)) continue;
-    marks.push([stream.length + (stream ? 1 : 0), ms]);
-    stream += (stream ? " " : "") + t;
-  }
-  const timeAt = (off: number) => {
-    let lo = 0;
-    let hi = marks.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (marks[mid][0] <= off) lo = mid;
-      else hi = mid - 1;
-    }
-    return marks[lo]?.[1] ?? 0;
-  };
+/** Break one caption into sentences. A line never crosses a caption boundary. */
+export function splitSpeech(text: string): string[] {
+  return splitSentences(text.trim()).map((line) => line.trim()).filter(Boolean);
+}
+
+/** One spoken line per slice of a caption. Time is shared by word count inside that caption only. */
+export function speechLines(segs: [number, number, string][]): { text: string; ms: number }[] {
   const lines: { text: string; ms: number }[] = [];
-  let off = 0;
-  for (const raw of splitSentences(stream)) {
-    const at = stream.indexOf(raw, off);
-    off = at + raw.length;
-    // Unpunctuated auto captions: cap a "sentence" at ~MAX_WORDS, breaking on segment boundaries.
-    const words = raw.trim().split(/\s+/);
-    if (words.length <= MAX_WORDS) {
-      lines.push({ text: raw.trim(), ms: timeAt(at) });
-      continue;
-    }
-    let start = at;
-    let cur = "";
-    let n = 0;
-    for (const m of raw.matchAll(/\S+\s*/g)) {
-      const pos = at + (m.index ?? 0);
-      const isBoundary = marks.some(([o]) => o === pos);
-      if (n >= MAX_WORDS * 0.6 && (isBoundary || n >= MAX_WORDS)) {
-        lines.push({ text: cur.trim(), ms: timeAt(start) });
-        cur = "";
-        n = 0;
-        start = pos;
-      }
-      cur += m[0];
-      n++;
-    }
-    if (cur.trim()) lines.push({ text: cur.trim(), ms: timeAt(start) });
+  for (const [ms, dur, raw] of segs) {
+    const text = raw.replace(/\s+/g, " ").replace(/^>>\s*/, "").trim();
+    if (!text || NOISE.test(text)) continue;
+    const duration = dur >= 400 ? dur : 4000;
+    const parts = splitSpeech(text);
+    const weights = parts.map((part) => Math.max(1, part.split(/\s+/).filter(Boolean).length));
+    const total = weights.reduce((sum, n) => sum + n, 0) || 1;
+    let used = 0;
+    parts.forEach((part, i) => {
+      lines.push({ text: part, ms: ms + (duration * used) / total });
+      used += weights[i];
+    });
   }
-  // Paragraphs: break on a pause of 2.5 s+ or every 6 sentences.
+  return lines;
+}
+
+/** Captions -> lesson text. Each spoken line is its own line, timed inside its caption. */
+export function captionsToLesson(c: Captions) {
+  const spoken = speechLines(c.segs);
+  let last = -1;
+  const times = spoken.map((line) => {
+    let t = Math.round(line.ms / 100) / 10;
+    if (t <= last) t = Math.round((last + 0.1) * 10) / 10;
+    last = t;
+    return t;
+  });
   const paras: string[][] = [];
-  const times: number[] = [];
   let para: string[] = [];
-  lines.forEach((l, k) => {
-    const gap = k > 0 ? l.ms - lines[k - 1].ms : 0;
+  spoken.forEach((line, k) => {
+    const gap = k > 0 ? line.ms - spoken[k - 1].ms : 0;
     if (para.length && (para.length >= 6 || gap > 9000)) {
       paras.push(para);
       para = [];
     }
-    para.push(l.text);
-    // parse() re-splits each line with the same splitter; keep one time per resulting sentence.
-    for (let i = 0; i < Math.max(1, splitSentences(l.text).length); i++) times.push(Math.round(l.ms / 100) / 10);
+    para.push(line.text);
   });
   if (para.length) paras.push(para);
   return { text: paras.map((p) => p.join("\n")).join("\n\n"), times };
