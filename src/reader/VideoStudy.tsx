@@ -8,7 +8,7 @@ import { ecdict, translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
 import { saveChoice, type SourceChoice } from "./hostedLesson";
 import { adoptReady, cacheStatusLine, forgetReady, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
-import { DESK_MODES, MODE_LABEL, dragPhrase, holdSentence, keptCaption, loopDecision, loopRange, nextSpeed, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, showsChinese, type DeskMode, type RowDisclosure } from "./lessonDesk";
+import { DESK_MODES, MODE_LABEL, clipReached, dragPhrase, keptCaption, loopDecision, loopRange, nextSpeed, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, showsChinese, type DeskMode, type RowDisclosure } from "./lessonDesk";
 import { LessonPractice } from "./LessonPractice";
 import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAudio";
 import { readNote, writeNote } from "./lessonNotes";
@@ -564,15 +564,10 @@ export function VideoStudy({
         player.current?.seek(decision.at);
         player.current?.play();
       }
-    } else if (pauseAfter && span) {
-      const gate = holdSentence({ time: t, start: span.start, end: span.end, loop: false, pauseAtEnd: true });
-      if (gate.type === "pause") {
-        if (!atEnd.current) {
-          atEnd.current = true;
-          player.current?.pause();
-        }
-      } else if (t < span.end - 0.25) atEnd.current = false;
-    }
+    } else if (pauseAfter && span && clipReached(t, span.start, span.end)) {
+      atEnd.current = true;
+      player.current?.pause();
+    } else if (t < (span?.end ?? 0) - 0.25) atEnd.current = false;
     if (picking.current || Date.now() < hold.current) return;
     const follow = !looping && !pauseAfter;
     const i = keptCaption(current, sentenceAt(times, t), follow);
@@ -729,6 +724,7 @@ export function VideoStudy({
       </div>
     );
   };
+  const bound = pauseAfter && !loopOn && pointA == null ? loopRange(times, cur, cur) : null;
   return createPortal(
     <div className={`desk ${mode === "read" ? "is-read" : ""}`} data-testid="video-study">
       <header className="desk-top">
@@ -760,9 +756,9 @@ export function VideoStudy({
       <div className="vs-stage" ref={stageRef}>
         <div className={hideVideo ? "desk-frame is-collapsed" : "desk-frame"}>
         {playingCache ? (
-          <LocalPlayer key={readyUrl} ref={player} src={readyUrl} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} rate={speed} />
+          <LocalPlayer key={readyUrl} ref={player} src={readyUrl} title={lesson.title} initial={bootAt} clip={bound} onTime={onTime} onPhase={setPhase} rate={speed} />
         ) : (
-          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} onTime={onTime} onPhase={setPhase} onUseLocal={chooseLocal} rate={speed} />
+          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} clip={bound} onTime={onTime} onPhase={setPhase} onUseLocal={chooseLocal} rate={speed} />
         )}
         {!hideVideo && <button type="button" className="desk-replay" aria-label="重播这一句" data-testid="desk-replay" onClick={replay} />}
         </div>

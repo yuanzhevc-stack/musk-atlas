@@ -124,7 +124,10 @@ export function holdSentence(input: { time: number; start: number; end: number; 
   return { type: "follow" };
 }
 
-/** While pause-at-end or loop is on, the caption stays put. Only continuous follow may adopt the clock's sentence. */
+/** True once the clock has left this sentence. A later tick must still pause; one pause is not enough. */
+export function clipReached(time: number, start: number, end: number): boolean {
+  return holdSentence({ time, start, end, loop: false, pauseAtEnd: true }).type === "pause";
+}
 export function keptCaption(current: number, clockIndex: number, follow: boolean): number {
   return follow ? clockIndex : current;
 }

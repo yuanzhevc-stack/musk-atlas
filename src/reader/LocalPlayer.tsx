@@ -1,6 +1,7 @@
 /** Native playback of a hosted full lesson. The clock is the file's own currentTime. */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { PlayerHandle, PlayerPhase } from "./YoutubePlayer";
+import { clipReached } from "./lessonDesk";
 
 export const LocalPlayer = forwardRef<PlayerHandle, {
   src: string;
@@ -9,14 +10,18 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
   onTime?: (seconds: number) => void;
   onPhase?: (phase: PlayerPhase) => void;
   rate?: number;
-}>(function LocalPlayer({ src, title, initial, onTime, onPhase, rate = 1 }, ref) {
+  /** Hard stop for the current sentence. Null while a loop or continuous play is on. */
+  clip?: { start: number; end: number } | null;
+}>(function LocalPlayer({ src, title, initial, onTime, onPhase, rate = 1, clip = null }, ref) {
   const video = useRef<HTMLVideoElement>(null);
   const onTimeRef = useRef(onTime);
   const onPhaseRef = useRef(onPhase);
+  const clipRef = useRef(clip);
   const initialRef = useRef(initial);
   const [phase, setPhase] = useState<PlayerPhase>("loading");
   onTimeRef.current = onTime;
   onPhaseRef.current = onPhase;
+  clipRef.current = clip;
 
   const setPh = (next: PlayerPhase) => {
     setPhase(next);
@@ -83,7 +88,10 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
   }, [rate, src]);
 
   const emit = () => {
-    const t = video.current?.currentTime;
+    const node = video.current;
+    const t = node?.currentTime;
+    const bound = clipRef.current;
+    if (node && typeof t === "number" && bound && clipReached(t, bound.start, bound.end)) node.pause();
     if (typeof t === "number" && Number.isFinite(t)) onTimeRef.current?.(t);
   };
 
@@ -92,7 +100,6 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
       <video
         ref={video}
         playsInline
-        controls
         preload="auto"
         title={title}
         data-testid="local-video"

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkCloze, checkWords, clozePieces, dragPhrase, holdSentence, keptCaption, loopDecision, loopRange, nextSpeed, personalCards, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase } from "./lessonDesk.ts";
+import { checkCloze, checkWords, clipReached, clozePieces, dragPhrase, holdSentence, keptCaption, loopDecision, loopRange, nextSpeed, personalCards, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase } from "./lessonDesk.ts";
 
 test("dictation compares words and ignores punctuation", () => {
   const hit = checkWords("Now we go this way.", "now we go this way");
@@ -64,7 +64,11 @@ test("a sentence pauses at its end and the caption stays until follow is on", ()
   assert.deepEqual(holdSentence({ time: 26.5, start: 25.1, end: 26.4, loop: false, pauseAtEnd: true }), { type: "pause" });
   assert.deepEqual(holdSentence({ time: 26.5, start: 25.1, end: 26.4, loop: true, pauseAtEnd: true }), { type: "restart", at: 25.1 });
   assert.deepEqual(holdSentence({ time: 26.5, start: 25.1, end: 26.4, loop: false, pauseAtEnd: false }), { type: "follow" });
-  assert.equal(keptCaption(6, 7, false), 6);
+  assert.deepEqual(holdSentence({ time: 10, start: 0, end: 10, loop: false, pauseAtEnd: true }), { type: "pause" });
+  assert.deepEqual(holdSentence({ time: 10, start: 10, end: 17, loop: false, pauseAtEnd: true }), { type: "inside" });
+  assert.equal(clipReached(10, 0, 10), true);
+  assert.equal(clipReached(10, 10, 17), false);
+  assert.equal(clipReached(16.95, 10, 17), true);
   assert.equal(keptCaption(6, 7, true), 7);
   assert.equal(REPLAY_BLOCKED.includes("button"), true);
   assert.equal(REPLAY_BLOCKED.includes("[data-ti]"), true);
