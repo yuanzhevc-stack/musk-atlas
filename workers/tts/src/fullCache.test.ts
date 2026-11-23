@@ -223,6 +223,13 @@ test("a ready report keeps the measured picture and does not invent 720p", async
   assert.equal(rec.height === 720, false);
 });
 
+test("capability announces manual-only and a 720 cap", async () => {
+  const b = bucket();
+  const res = await handleFullCache(new Request("https://worker.test/full/capability"), b, headers, { secret: "", now: 1_000 });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { scope: "manual-only", maxHeight: 720, preferFps: 30, policy: "lte-720" });
+});
+
 test("the public enqueue route rejects an arbitrary url", async () => {
   const b = bucket();
   const res = await handleFullCache(

@@ -53,18 +53,26 @@ def ffprobe_duration(path: str) -> float:
     return float(out.strip())
 
 
-# Small-window default. Prefer H.264 + AAC in an MP4 at or below 720p and 30fps.
-# The sort still picks the best match inside that cap. Nothing is upscaled.
-# If the source has no stream at or below 720p, the last branches take the
-# closest taller MP4. ffprobe records that real size. There is no --recode-video.
+# Hard cap: nothing taller than 720p. Prefer H.264 + AAC, MP4, and 30fps.
+# A shorter stream is allowed. If the source has no video at or below 720p,
+# yt-dlp fails and the job is reported failed. There is no 1080p fallback
+# and no --recode-video.
 MANUAL_FORMAT = (
     "bv*[height<=720][fps<=30][vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]"
     "/bv*[height<=720][fps<=30][vcodec^=avc1]+ba[acodec^=mp4a]"
     "/bv*[height<=720][ext=mp4]+ba[ext=m4a]"
     "/b[height<=720][ext=mp4]"
-    "/bv*[height>720][vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]"
-    "/b[height>720][ext=mp4]"
+    "/bv*[height<=720]+ba[acodec^=mp4a]/b[height<=720]"
 )
+CAPABILITY_SCOPE = "manual-only"
+CAPABILITY_POLICY = "lte-720"
+CAPABILITY_MAX_HEIGHT = 720
+
+
+def worker_is_manual_720(body: object) -> bool:
+    if not isinstance(body, dict):
+        return False
+    return body.get("scope") == CAPABILITY_SCOPE and body.get("maxHeight") == CAPABILITY_MAX_HEIGHT and body.get("policy") == CAPABILITY_POLICY
 
 
 def run_mode(argv: list[str]) -> str:
@@ -137,6 +145,19 @@ def worker_request(url: str, secret: str, method: str, data: bytes | None, conte
         return json.loads(res.read().decode())
 
 
+def require_manual_worker(worker: str, secret: str) -> bool:
+    """Fail closed before any claim. An old Worker has no capability route and must not be asked for a job."""
+    try:
+        body = worker_request(worker.rstrip("/") + "/full/capability", secret, "GET", None, None, 30)
+    except Exception as exc:
+        print(f"Worker capability check failed closed, no job was claimed: {exc}", file=sys.stderr)
+        return False
+    if not worker_is_manual_720(body):
+        print("Worker is not the manual-only <=720 build. No job was claimed.", file=sys.stderr)
+        return False
+    return True
+
+
 def post(url: str, secret: str, payload: dict) -> dict:
     return worker_request(url, secret, "POST", json.dumps(payload).encode(), "application/json", 60)
 
@@ -197,6 +218,12 @@ def run_once(worker: str, secret: str) -> int:
             media = probe_media(target)
         except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError):
             media = {}
+        height = media.get("height")
+        if not isinstance(height, int) or height <= 0 or height > CAPABILITY_MAX_HEIGHT:
+            reason = "above-720" if isinstance(height, int) and height > CAPABILITY_MAX_HEIGHT else "unmeasured-height"
+            post(worker.rstrip("/") + "/full/result", secret, {"v": video_id, "outcome": "failed", "bytes": size, "duration": duration, "error": reason, **media})
+            print(f"rejected {reason} height={height}")
+            return 3
         if size < MIN_BYTES or duration < MIN_SECONDS:
             post(worker.rstrip("/") + "/full/result", secret, {"v": video_id, "outcome": "failed", "bytes": size, "duration": duration, "error": "not-a-full-video", **media})
             print(f"rejected size={size} duration={duration}")
@@ -231,6 +258,8 @@ def main() -> int:
     if shutil.which("yt-dlp") is None or shutil.which("ffprobe") is None:
         print("yt-dlp and ffprobe must be installed on the machine that runs this.", file=sys.stderr)
         return 1
+    if not require_manual_worker(worker, secret):
+        return 3
     while True:
         code = run_once(worker, secret)
         if mode != "manual-loop":

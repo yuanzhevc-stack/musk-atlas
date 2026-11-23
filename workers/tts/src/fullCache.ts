@@ -14,6 +14,8 @@ export const MAX_PART_BYTES = 80 * 1024 * 1024;
 export const MAX_OBJECT_BYTES = 512 * 1024 * 1024;
 export const STALE_MS = 20 * 60 * 1000;
 export const PUBLIC_BASE = "https://pub-ad0e50befa7b4387a7d73a8c8a796eb3.r2.dev";
+/** Public handshake. The downloader claims only after it sees this exact shape. */
+export const CACHE_CAPABILITY = { scope: "manual-only", maxHeight: 720, preferFps: 30, policy: "lte-720" } as const;
 
 export type JobStatus = "queued" | "running" | "ready" | "refused" | "failed";
 export type JobOrigin = "manual" | "legacy";
@@ -350,6 +352,9 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
       acodec: typeof body.acodec === "string" ? body.acodec : undefined,
     });
     return json(result.job, result.status, headers);
+  }
+  if (url.pathname === "/full/capability" && req.method === "GET") {
+    return json(CACHE_CAPABILITY, 200, headers);
   }
   if (url.pathname === "/full/claim") {
     if (req.method !== "POST") return json({ error: "method" }, 405, headers);
