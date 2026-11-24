@@ -1,5 +1,5 @@
 /** Video-first study: player and the lesson's own captions. Word taps reuse the reader card. */
-import { BookMarked, BookOpen, Compass, Copy, Eye, EyeOff, Maximize, Mic, MoreHorizontal, Pause, Play, Repeat, RotateCcw, Search, SkipBack, SkipForward, StickyNote, Star } from "lucide-react";
+import { BookMarked, BookOpen, Clock, Compass, Copy, Eye, EyeOff, Heart, Maximize, Mic, MoreHorizontal, Pause, Pencil, Play, Repeat, RotateCcw, Search, SkipBack, SkipForward } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { Item, Lesson, Token } from "./model";
@@ -12,7 +12,7 @@ import { DESK_MODES, MODE_LABEL, clipReached, dragPhrase, keptCaption, loopDecis
 import { LessonPractice } from "./LessonPractice";
 import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAudio";
 import { readNote, writeNote } from "./lessonNotes";
-import { followAllowed, lessonMedia, lyricScroll, sentenceAt, shouldRecenter } from "./sync";
+import { followAllowed, lessonMedia, lyricScroll, sentenceAt, sentenceSpan, shouldRecenter } from "./sync";
 import { YoutubePlayer, type PlayerHandle, type PlayerPhase } from "./YoutubePlayer";
 import { captionsToLesson, clockOf, fetchCaptions, watchUrl } from "./youtube";
 import { toast } from "../ui/Toast";
@@ -173,6 +173,8 @@ export function VideoStudy({
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const [phase, setPhase] = useState<PlayerPhase>("loading");
+  const [mediaClock, setMediaClock] = useState(0);
+  const [mediaDur, setMediaDur] = useState(0);
   const [tr, setTr] = useState<Record<number, string>>({});
   const [hint, setHint] = useState("");
   const [held, setHeld] = useState(false);
@@ -534,6 +536,7 @@ export function VideoStudy({
   }, [lesson.id, yt.v]); // eslint-disable-line react-hooks/exhaustive-deps
   const onTime = (t: number) => {
     clock.current = t;
+    setMediaClock((prev) => (Math.abs(prev - t) < 0.35 ? prev : t));
     const current = curRef.current;
     const times = timesRef.current;
     const looping = loopOn || pointA != null;
@@ -703,7 +706,10 @@ export function VideoStudy({
           selFrom={hit && sel ? sel.from : -1}
           selTo={hit && sel ? sel.to : -1}
           stamp={stampOf(line.tokens, items, phraseAt)}
-          timeLabel={times[line.sid] != null ? clockOf(times[line.sid]) : "–"}
+          timeLabel={(() => {
+            const span = sentenceSpan(times, line.sid);
+            return span ? `${clockOf(span.t)} - ${clockOf(span.e)}` : "–";
+          })()}
           showTr={showZh && disclosure !== "answer-hidden"}
           tr={disclosure === "answer-hidden" ? "" : (tr[line.sid] ?? (showZh ? "正在取译文…" : ""))}
           disclosure={disclosure}
@@ -714,8 +720,8 @@ export function VideoStudy({
         {inTranscript && (
           <div className="desk-row-actions">
             <button type="button" aria-label="复制这一句" onClick={() => copySentence(line.text)}><Copy size={14} /></button>
-            <button type="button" aria-label="收藏这一句" onClick={() => favoriteSentence(line.sid, line.text)}><Star size={14} /></button>
-            <button type="button" aria-label="给这一句写笔记" onClick={() => openNote(line.sid, line.text)}><StickyNote size={14} /></button>
+            <button type="button" aria-label="收藏这一句" onClick={() => favoriteSentence(line.sid, line.text)}><Heart size={16} /></button>
+            <button type="button" aria-label="给这一句写笔记" onClick={() => openNote(line.sid, line.text)}><Pencil size={16} /></button>
             <button type="button" aria-label="录下自己的声音" onClick={() => void recordSentence(line.sid)}><Mic size={14} /></button>
             <button type="button" aria-label="播放这一句" onClick={() => jump(line.sid)}><Play size={14} /></button>
             {clips[line.sid] && <audio src={clips[line.sid]} controls preload="none" data-testid="sentence-audio" />}
@@ -734,48 +740,55 @@ export function VideoStudy({
           <button type="button" role="tab" aria-selected={playingCache} aria-label="已缓存的整段视频" className={playingCache ? "is-on" : ""} onClick={chooseLocal} data-testid="vs-source-local">本地</button>
           <button type="button" role="tab" aria-selected={!playingCache} className={!playingCache ? "is-on" : ""} onClick={() => switchSource("online")} data-testid="vs-source-online">在线</button>
         </div>
-        <div className="desk-modes" role="tablist" aria-label="学习模式">
-          {DESK_MODES.map((id) => (
-            <button key={id} type="button" role="tab" aria-selected={mode === id} className={mode === id ? "is-on" : ""} onClick={() => setMode(id)} data-testid={id === "both" ? "vs-tr-toggle" : `mode-${id}`}>
-              {MODE_LABEL[id]}
-            </button>
-          ))}
-        </div>
-        <button type="button" className="desk-more" aria-label="更多" aria-expanded={menu} onClick={() => setMenu((v) => !v)}><MoreHorizontal size={16} /></button>
-        {menu && (
-          <div className="desk-menu" role="menu">
-            <a href="#/reader" role="menuitem"><BookOpen size={14} /> 课程</a>
-            <a href="#/corpus" role="menuitem"><BookMarked size={14} /> 语料</a>
-            <a href="#/today" role="menuitem"><Compass size={14} /> 今日</a>
-            <button type="button" role="menuitem" onClick={() => window.dispatchEvent(new Event("musk-atlas:lookup"))}><Search size={14} /> 查词</button>
-            <button type="button" role="menuitem" onClick={() => window.dispatchEvent(new Event("musk-atlas:study-read"))}>阅读文本</button>
-          </div>
-        )}
       </header>
       <div className="desk-split">
       <div className="vs-stage" ref={stageRef}>
         <div className={hideVideo ? "desk-frame is-collapsed" : "desk-frame"}>
         {playingCache ? (
-          <LocalPlayer key={readyUrl} ref={player} src={readyUrl} title={lesson.title} initial={bootAt} clip={bound} onTime={onTime} onPhase={setPhase} rate={speed} />
+          <LocalPlayer key={readyUrl} ref={player} src={readyUrl} title={lesson.title} initial={bootAt} clip={bound} onTime={onTime} onPhase={setPhase} onDuration={setMediaDur} rate={speed} />
         ) : (
-          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} clip={bound} onTime={onTime} onPhase={setPhase} onUseLocal={chooseLocal} rate={speed} />
+          <YoutubePlayer key="online" ref={player} videoId={yt.v} title={lesson.title} initial={bootAt} clip={bound} onTime={onTime} onPhase={setPhase} onDuration={setMediaDur} onUseLocal={chooseLocal} rate={speed} />
         )}
         {!hideVideo && <button type="button" className="desk-replay" aria-label="重播这一句" data-testid="desk-replay" onClick={replay} />}
+        {!hideVideo && (
+          <div className="desk-progress">
+            <span>{clockOf(mediaClock)}</span>
+            <button
+              type="button"
+              className="desk-progress-track"
+              aria-label="跳到这一句"
+              onClick={(e) => {
+                if (!(mediaDur > 0)) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+                jump(sentenceAt(times, ratio * mediaDur));
+              }}
+            >
+              <i style={{ width: `${mediaDur > 0 ? Math.min(100, (mediaClock / mediaDur) * 100) : 0}%` }} />
+            </button>
+            <span>{mediaDur > 0 ? clockOf(mediaDur) : "–"}</span>
+          </div>
+        )}
+        {loopOn && !hideVideo && (
+          <button type="button" className="desk-chip" onClick={() => setLoopOn(false)}>循环之后暂停 ×</button>
+        )}
         </div>
         <div className="desk-tools" role="group" aria-label="本句播放">
           <button type="button" onClick={() => setSpeed((n) => nextSpeed(n))} aria-label="播放速度" data-testid="desk-speed"><span className="desk-glyph">{speed === 1 ? "1×" : `${speed}×`}</span><span>倍速</span></button>
           <button type="button" className={hideVideo ? "is-on" : ""} onClick={() => setHideVideo((v) => !v)} aria-pressed={hideVideo} aria-label={hideVideo ? "显示视频" : "隐藏视频"}>{hideVideo ? <Eye size={18} /> : <EyeOff size={18} />}<span>隐藏视频</span></button>
           <button type="button" onClick={() => { const node = stageRef.current; if (!node) return; if (document.fullscreenElement) void document.exitFullscreen(); else void node.requestFullscreen?.(); }} aria-label="全屏"><Maximize size={18} /><span>全屏</span></button>
-          <button type="button" className={ipaOn ? "is-on" : ""} aria-pressed={ipaOn} onClick={() => setIpaOn((v) => !v)} aria-label="音标" data-testid="desk-ipa"><span className="desk-glyph">A</span><span>音标</span></button>
+          <button type="button" className={ipaOn ? "is-on" : ""} aria-pressed={ipaOn} onClick={() => setIpaOn((v) => !v)} aria-label="音标" data-testid="desk-ipa"><span className="desk-glyph">æ</span><span>音标</span></button>
           <button type="button" onClick={() => step(-1)} disabled={cur <= 0} aria-label="上一句" data-testid="vs-prev"><SkipBack size={18} /><span>上一句</span></button>
           <button type="button" className="desk-play" onClick={() => { if (atEnd.current) replay(); else player.current?.toggle(); }} disabled={playDisabled} aria-label={phase === "playing" ? "暂停" : "播放"} data-testid="vs-play">{phase === "playing" ? <Pause size={18} /> : <Play size={18} />}<span>{phase === "playing" ? "暂停" : "播放"}</span></button>
           <button type="button" onClick={() => step(1)} disabled={cur >= last} aria-label="下一句" data-testid="vs-next"><SkipForward size={18} /><span>下一句</span></button>
           <button type="button" className={pointA != null ? "is-on" : ""} aria-pressed={pointA != null} onClick={() => setPointA((a) => (a === cur ? null : cur))} aria-label="设置 A 点" data-testid="desk-a"><span className="desk-glyph">A</span><span>A点</span></button>
           <button type="button" className={loopOn ? "is-on" : ""} aria-pressed={loopOn} onClick={() => setLoopOn((v) => !v)} aria-label="单句循环" data-testid="desk-loop"><Repeat size={18} /><span>单句循环</span></button>
-          <label className="desk-tool desk-interval">间隔
+          <label className="desk-tool desk-interval">
+            <Clock size={16} />
             <input type="number" min={0} max={15} step={1} value={intervalSec} onChange={(e) => setIntervalSec(Math.max(0, Math.min(15, Number(e.target.value) || 0)))} aria-label="循环间隔秒数" data-testid="desk-interval" />
+            <span>间隔</span>
           </label>
-          <button type="button" className={pauseAfter ? "is-on" : ""} aria-pressed={pauseAfter} onClick={() => setPauseAfter((v) => !v)} data-testid="desk-pause"><RotateCcw size={18} /><span>单句暂停</span></button>
+          <button type="button" className={pauseAfter ? "is-on" : "is-off"} aria-pressed={pauseAfter} onClick={() => setPauseAfter((v) => !v)} data-testid="desk-pause"><RotateCcw size={16} />{!pauseAfter && <em className="desk-off">OFF</em>}<span>单句暂停</span></button>
         </div>
         {!playingCache && job && (job.status !== "unknown" || job.runner === "unreachable") && (
           <p className="desk-cache" data-testid={phase === "error" ? "vs-local-name" : "vs-cache-status"}>
@@ -823,16 +836,34 @@ export function VideoStudy({
         </div>
       </div>
       <div className="desk-transcript">
+      <div className="desk-transcript-top">
+        <div className="desk-modes" role="tablist" aria-label="学习模式">
+          {DESK_MODES.map((id) => (
+            <button key={id} type="button" role="tab" aria-selected={mode === id} className={mode === id ? "is-on" : ""} onClick={() => setMode(id)} data-testid={id === "both" ? "vs-tr-toggle" : `mode-${id}`}>
+              {MODE_LABEL[id]}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="desk-more" aria-label="更多" aria-expanded={menu} onClick={() => setMenu((v) => !v)}><MoreHorizontal size={16} /></button>
+        {menu && (
+          <div className="desk-menu" role="menu">
+            <a href="#/reader" role="menuitem"><BookOpen size={14} /> 课程</a>
+            <a href="#/corpus" role="menuitem"><BookMarked size={14} /> 语料</a>
+            <a href="#/today" role="menuitem"><Compass size={14} /> 今日</a>
+            <button type="button" role="menuitem" onClick={() => window.dispatchEvent(new Event("musk-atlas:lookup"))}><Search size={14} /> 查词</button>
+            <button type="button" role="menuitem" onClick={() => window.dispatchEvent(new Event("musk-atlas:study-read"))}>阅读文本</button>
+            <a href={watchUrl(yt.v, at ?? 0)} target="_blank" rel="noreferrer" role="menuitem">在 YouTube 打开</a>
+          </div>
+        )}
+      </div>
       <label className="desk-search">
         <Search size={14} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索英文字幕" aria-label="搜索字幕" data-testid="transcript-search" />
       </label>
       <div className="vs-subs" ref={listRef} role="list" aria-label="字幕" data-testid="vs-subs" onScroll={onListScroll}>
-        <div className="lyric-pad" aria-hidden="true" />
         {held && <button type="button" className="vs-return" onClick={backToCurrent} data-testid="vs-return">回到当前句</button>}
         {visible.map((line) => row(line, true))}
         {!visible.length && <p className="desk-empty">没有符合搜索的句子。</p>}
-        <div className="lyric-pad" aria-hidden="true" />
       </div>
       </div>
       </div>

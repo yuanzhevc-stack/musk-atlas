@@ -20,6 +20,7 @@ interface YTPlayer {
   playVideo: () => void;
   pauseVideo: () => void;
   getCurrentTime: () => number;
+  getDuration?: () => number;
   getPlayerState: () => number;
   setPlaybackRate?: (rate: number) => void;
   destroy: () => void;
@@ -80,12 +81,13 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
   /** Called with the video clock. Parents should ignore calls that do not change the sentence. */
   onTime?: (seconds: number) => void;
   onPhase?: (phase: PlayerPhase) => void;
+  onDuration?: (seconds: number) => void;
   /** Leave the embed and pick a downloaded file. Omitted where there is no lesson file. */
   onUseLocal?: () => void;
   rate?: number;
   /** Hard stop for the current sentence. Null while a loop or continuous play is on. */
   clip?: { start: number; end: number } | null;
-}>(function YoutubePlayer({ videoId, title, initial, end, nonce = 0, onTime, onPhase, onUseLocal, rate = 1, clip = null }, ref) {
+}>(function YoutubePlayer({ videoId, title, initial, end, nonce = 0, onTime, onPhase, onDuration, onUseLocal, rate = 1, clip = null }, ref) {
   const frame = useRef<HTMLDivElement>(null);
   const player = useRef<YTPlayer | null>(null);
   const initialRef = useRef(initial);
@@ -96,6 +98,7 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
   }
   const onTimeRef = useRef(onTime);
   const onPhaseRef = useRef(onPhase);
+  const onDurationRef = useRef(onDuration);
   const clipRef = useRef(clip);
   const phaseRef = useRef<PlayerPhase>("loading");
   const [phase, setPhase] = useState<PlayerPhase>("loading");
@@ -103,6 +106,7 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
   const [attempt, setAttempt] = useState(0);
   onTimeRef.current = onTime;
   onPhaseRef.current = onPhase;
+  onDurationRef.current = onDuration;
   clipRef.current = clip;
 
   const setPh = (next: PlayerPhase, text = "") => {
@@ -243,6 +247,8 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
                     if (!alive) return;
                     try {
                       const t = player.current?.getCurrentTime?.();
+                      const dur = player.current?.getDuration?.();
+                      if (typeof dur === "number" && Number.isFinite(dur) && dur > 0) onDurationRef.current?.(dur);
                       const bound = clipRef.current;
                       if (typeof t === "number" && bound && clipReached(t, bound.start, bound.end)) {
                         try {

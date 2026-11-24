@@ -9,18 +9,21 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
   initial: number;
   onTime?: (seconds: number) => void;
   onPhase?: (phase: PlayerPhase) => void;
+  onDuration?: (seconds: number) => void;
   rate?: number;
   /** Hard stop for the current sentence. Null while a loop or continuous play is on. */
   clip?: { start: number; end: number } | null;
-}>(function LocalPlayer({ src, title, initial, onTime, onPhase, rate = 1, clip = null }, ref) {
+}>(function LocalPlayer({ src, title, initial, onTime, onPhase, onDuration, rate = 1, clip = null }, ref) {
   const video = useRef<HTMLVideoElement>(null);
   const onTimeRef = useRef(onTime);
   const onPhaseRef = useRef(onPhase);
+  const onDurationRef = useRef(onDuration);
   const clipRef = useRef(clip);
   const initialRef = useRef(initial);
   const [phase, setPhase] = useState<PlayerPhase>("loading");
   onTimeRef.current = onTime;
   onPhaseRef.current = onPhase;
+  onDurationRef.current = onDuration;
   clipRef.current = clip;
 
   const setPh = (next: PlayerPhase) => {
@@ -68,6 +71,8 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
     if (!v) return;
     v.src = src;
     const seekAndPlay = () => {
+      const dur = v.duration;
+      if (typeof dur === "number" && Number.isFinite(dur) && dur > 0) onDurationRef.current?.(dur);
       try {
         v.currentTime = Math.max(0, initialRef.current);
       } catch {
