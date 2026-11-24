@@ -53,7 +53,8 @@ export function rememberedReady(videoId: string): { url: string; bytes: number; 
   const store = readJson<ReadyStore>(READY_KEY, { version: 1, byVideo: {} });
   const rec = store.byVideo?.[videoId];
   if (!rec || rec.url !== fullMediaUrl(videoId) || rec.url.includes("/clips/")) return null;
-  if (rec.bytes < 2_000_000 || rec.duration < 20) return null;
+  if (rec.bytes < 2_000_000) return null;
+  if (rec.duration > 0 && rec.duration < 20) return null;
   return rec;
 }
 
@@ -85,12 +86,12 @@ export function adoptReady(started: SourceChoice, phase: "loading" | "playing" |
 
 function viewFrom(raw: Partial<CacheView> & { v?: string }, fallback: string): CacheView {
   const v = raw.v || fallback;
+  const big = typeof raw.bytes === "number" && raw.bytes >= 2_000_000;
+  const longEnough = raw.duration == null || (typeof raw.duration === "number" && raw.duration >= 20);
   const verified =
     raw.status === "ready" &&
-    typeof raw.bytes === "number" &&
-    raw.bytes >= 2_000_000 &&
-    typeof raw.duration === "number" &&
-    raw.duration >= 20 &&
+    big &&
+    longEnough &&
     !(raw.url || "").includes("/clips/");
   return {
     v,
@@ -156,7 +157,7 @@ function rememberJob(view: CacheView) {
   store.version = 1;
   store.byVideo[view.v] = view;
   writeJson(JOB_KEY, store);
-  if (view.verified && view.bytes && view.duration) rememberReady(view.v, view.bytes, view.duration);
+  if (view.verified && view.bytes) rememberReady(view.v, view.bytes, view.duration && view.duration >= 20 ? view.duration : 0);
 }
 
 export function rememberedJob(videoId: string): CacheView | null {
@@ -204,25 +205,60 @@ export async function enqueueFullCache(v: string, fetchImpl: typeof fetch = fetc
   }
 }
 
-export async function readFullCache(v: string, fetchImpl: typeof fetch = fetch): Promise<CacheView> {
-  try {
-    const res = await fetchImpl(`${TTS_URL}/full/jobs?v=${encodeURIComponent(v)}`);
-    if (res.ok || res.status === 429) {
-      const view = await readBody(res, v);
-      rememberJob(view);
-      return view;
-    }
-  } catch {
-    /* the public record is the fallback */
-  }
+function objectBytes(res: Response): number | null {
+  const range = res.headers.get("content-range") ?? "";
+  const total = range.match(/\/(\d+)\s*$/);
+  if (total) return Number(total[1]);
+  const len = Number(res.headers.get("content-length"));
+  if (res.ok && Number.isFinite(len) && len >= 2_000_000) return len;
+  return null;
+}
+
+/** A file already in storage wins over a job that still says it is downloading. */
+async function storedFile(v: string, fetchImpl: typeof fetch): Promise<CacheView | null> {
   try {
     const pub = await fetchImpl(`${PUBLIC_BASE}/full/ready/${v}.json`, { cache: "no-store" });
-    if (!pub.ok) return rememberedJob(v) ?? { v, status: "unknown", runner: "unreachable", verified: false };
-    const rec = (await pub.json()) as { bytes?: number; duration?: number; url?: string };
-    const view = viewFrom({ v, status: "ready", runner: "configured", bytes: rec.bytes, duration: rec.duration, url: rec.url }, v);
-    rememberJob(view);
-    return view;
+    if (pub.ok) {
+      const rec = (await pub.json().catch(() => null)) as { bytes?: number; duration?: number; url?: string } | null;
+      if (rec) {
+        const view = viewFrom({ v, status: "ready", runner: "configured", bytes: rec.bytes, duration: rec.duration, url: rec.url || fullMediaUrl(v) }, v);
+        if (view.verified) return view;
+      }
+    }
   } catch {
-    return rememberedJob(v) ?? { v, status: "unknown", runner: "unreachable", verified: false };
+    /* the object itself is the other way to know */
   }
+  try {
+    const head = await fetchImpl(fullMediaUrl(v), { method: "HEAD", cache: "no-store" });
+    const bytes = objectBytes(head);
+    if (bytes == null) return null;
+    const view = viewFrom({ v, status: "ready", runner: "configured", bytes, url: fullMediaUrl(v) }, v);
+    return view.verified ? view : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function readFullCache(v: string, fetchImpl: typeof fetch = fetch): Promise<CacheView> {
+  let job: CacheView | null = null;
+  try {
+    const res = await fetchImpl(`${TTS_URL}/full/jobs?v=${encodeURIComponent(v)}`);
+    if (res.ok || res.status === 429) job = await readBody(res, v);
+  } catch {
+    /* the public file is the fallback */
+  }
+  if (job?.verified) {
+    rememberJob(job);
+    return job;
+  }
+  const stored = await storedFile(v, fetchImpl);
+  if (stored) {
+    rememberJob(stored);
+    return stored;
+  }
+  if (job) {
+    rememberJob(job);
+    return job;
+  }
+  return rememberedJob(v) ?? { v, status: "unknown", runner: "unreachable", verified: false };
 }

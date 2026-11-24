@@ -28,7 +28,11 @@ test("spoken lines stay inside their caption and do not share one start time", a
   assert.equal(lines[0].ms, 0);
   assert.ok(lines[1].ms >= 10000);
   assert.ok(lines.every((line, i) => i === 0 || line.ms > lines[i - 1].ms));
-  assert.equal(lines.some((line) => /merger/i.test(line.text) && line.ms < 17000), false);
+  const relates = lines.find((line) => /relates to the merger/i.test(line.text));
+  assert.ok(relates);
+  assert.ok(relates.ms >= 10000);
+  assert.ok(relates.ms < 17000);
+  assert.equal(lines.some((line) => /merger/i.test(line.text) && line.ms < 10000), false);
   const lesson = captionsToLesson({ v: "abcdefghijk", title: "", author: "", lang: "en", kind: "manual", segs });
   assert.equal(lesson.times.length, parse(lesson.text).sentences.length);
   assert.equal(lesson.times.length, lesson.text.split(/\n+/).filter((line) => line.trim()).length);
@@ -36,7 +40,24 @@ test("spoken lines stay inside their caption and do not share one start time", a
   const sentences = parse(lesson.text).sentences;
   const merger = sentences.findIndex((line) => /merger/i.test(line));
   assert.ok(merger > 0);
-  assert.ok(lesson.times[merger] >= 17);
+  assert.ok(lesson.times[merger] >= 10);
+  assert.ok(lesson.times[merger] < 17);
+});
+
+test("caption fragments join into a sentence and a new but-clause starts another", async () => {
+  const { speechLines } = await import("./youtube.ts");
+  const lines = speechLines([
+    [61000, 2000, "Many of you know that I'm very big"],
+    [63000, 2000, "on creating a vision for your future,"],
+    [65000, 2000, "but the best way to do that"],
+    [67000, 2000, "is by also creating an antidote"],
+    [69000, 2000, "and having a negative thing."],
+  ]);
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].text, "Many of you know that I'm very big on creating a vision for your future,");
+  assert.equal(lines[0].ms, 61000);
+  assert.equal(lines[1].text, "but the best way to do that is by also creating an antidote and having a negative thing.");
+  assert.equal(lines[1].ms, 65000);
 });
 
 test("all-caps captions become sentence case and normal captions stay", async () => {

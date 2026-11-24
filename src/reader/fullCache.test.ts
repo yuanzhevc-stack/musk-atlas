@@ -84,4 +84,16 @@ test("a public ready record is accepted only when it is a full file", async () =
   assert.equal(ready.verified, true);
   assert.equal(ready.url, fullMediaUrl(id));
   assert.equal(openingSource(id), "local");
+  mem.clear();
+  const running = await readFullCache(id, async (url, init) => {
+    const href = String(url);
+    if (href.includes("/full/jobs")) return new Response(JSON.stringify({ v: id, status: "running", runner: "configured" }), { status: 200 });
+    if (href.endsWith(".json")) return new Response("no", { status: 404 });
+    assert.equal(init?.method, "HEAD");
+    return new Response(null, { status: 200, headers: { "content-length": "8000000" } });
+  });
+  assert.equal(running.verified, true);
+  assert.equal(running.status, "ready");
+  assert.equal(openingSource(id), "local");
+  assert.match(cacheStatusLine(running, true), /已缓存的整段/);
 });

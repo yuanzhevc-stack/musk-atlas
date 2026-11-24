@@ -89,14 +89,21 @@ export function sentenceCase(text: string): string {
   });
 }
 
-/** Break one caption into sentences. A line never crosses a caption boundary. */
+/** Break one caption into sentences. A trailing fragment stays, so the next caption can finish it. */
 export function splitSpeech(text: string): string[] {
   return splitSentences(text.trim()).map((line) => line.trim()).filter(Boolean);
 }
 
-/** One spoken line per slice of a caption. Time is shared by word count inside that caption only. */
+const CLAUSE_BREAK = /[,;]\s*$/;
+const BUT_START = /^but\b/i;
+
+function endsSentence(text: string): boolean {
+  return /[.!?…]["'”’)\]]*\s*$/.test(text);
+}
+
+/** One study sentence. Caption lines join until a real stop, or a comma followed by "but". */
 export function speechLines(segs: [number, number, string][]): { text: string; ms: number }[] {
-  const lines: { text: string; ms: number }[] = [];
+  const pieces: { text: string; ms: number }[] = [];
   for (const [ms, dur, raw] of segs) {
     const text = raw.replace(/\s+/g, " ").replace(/^>>\s*/, "").trim();
     if (!text || NOISE.test(text)) continue;
@@ -106,14 +113,29 @@ export function speechLines(segs: [number, number, string][]): { text: string; m
     const total = weights.reduce((sum, n) => sum + n, 0) || 1;
     let used = 0;
     parts.forEach((part, i) => {
-      lines.push({ text: sentenceCase(part), ms: ms + (duration * used) / total });
+      pieces.push({ text: part, ms: ms + (duration * used) / total });
       used += weights[i];
     });
   }
+  const lines: { text: string; ms: number }[] = [];
+  let buf: { text: string; ms: number }[] = [];
+  const flush = () => {
+    if (!buf.length) return;
+    const text = sentenceCase(buf.map((part) => part.text).join(" ").replace(/\s+/g, " ").trim());
+    if (text) lines.push({ text, ms: buf[0].ms });
+    buf = [];
+  };
+  for (const piece of pieces) {
+    const prev = buf.map((part) => part.text).join(" ");
+    if (buf.length && CLAUSE_BREAK.test(prev) && BUT_START.test(piece.text)) flush();
+    buf.push(piece);
+    if (endsSentence(buf.map((part) => part.text).join(" "))) flush();
+  }
+  flush();
   return lines;
 }
 
-/** Captions -> lesson text. Each spoken line is its own line, timed inside its caption. */
+/** Captions -> lesson text. Fragments of one sentence share that sentence's start. */
 export function captionsToLesson(c: Captions) {
   const spoken = speechLines(c.segs);
   let last = -1;
