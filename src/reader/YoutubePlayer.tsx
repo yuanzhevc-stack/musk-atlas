@@ -127,6 +127,9 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
     },
     play() {
       try {
+        const bound = clipRef.current;
+        const t = player.current?.getCurrentTime?.();
+        if (bound && typeof t === "number" && t >= bound.end - 0.08) player.current?.seekTo(bound.start, true);
         player.current?.playVideo();
       } catch {
         /* player not ready */
@@ -142,7 +145,7 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
     toggle() {
       const state = player.current?.getPlayerState?.();
       if (state === PLAYING || state === BUFFERING) player.current?.pauseVideo();
-      else player.current?.playVideo();
+      else this.play();
     },
     getTime() {
       try {
@@ -208,6 +211,9 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
               ...(endAt != null ? { end: endAt } : {}),
               autoplay: 1,
               playsinline: 1,
+              controls: 0,
+              disablekb: 1,
+              fs: 0,
               rel: 0,
               modestbranding: 1,
               cc_load_policy: 0,
@@ -301,6 +307,29 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
     // `initial` is read through a ref so a sentence change does not rebuild the iframe.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoId, end, title, attempt]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const bound = clipRef.current;
+      const node = player.current;
+      if (!bound || !node?.getCurrentTime) return;
+      let t = 0;
+      try {
+        t = node.getCurrentTime();
+      } catch {
+        return;
+      }
+      if (!clipReached(t, bound.start, bound.end)) return;
+      const holdAt = Math.max(bound.start, bound.end - 0.05);
+      try {
+        if (t > holdAt + 0.08) node.seekTo(holdAt, true);
+        node.pauseVideo();
+      } catch {
+        /* destroyed */
+      }
+    }, 200);
+    return () => window.clearInterval(id);
+  }, [videoId, attempt]);
 
   useEffect(() => {
     if (!nonce || !player.current) return;

@@ -2033,13 +2033,18 @@ body.is-study .main { padding: 0; margin: 0; max-width: none; }
 .desk .vs-frame, .desk-frame .vs-frame { border-radius: 6px; }
 .desk-frame.is-collapsed { display: none; }
 .desk-frame { position: relative; }
+.desk-frame video,
+.desk-frame iframe { pointer-events: none; }
+.desk-frame video::-webkit-media-controls,
+.desk-frame video::-webkit-media-controls-enclosure,
+.desk-frame video::-webkit-media-controls-panel { display: none !important; }
 .desk-replay {
   position: absolute;
   z-index: 2;
   left: 0;
   right: 0;
   top: 0;
-  bottom: 36px;
+  bottom: 0;
   border: 0;
   background: transparent;
   cursor: pointer;
@@ -2408,7 +2413,6 @@ body.is-study .main { padding: 0; margin: 0; max-width: none; }
   border-radius: 16px;
   background: #fff;
 }
-.desk-sheet:has(.vs-now) { justify-content: flex-start; }
 .desk-wait { margin: auto; color: #c5cad1; font-size: 14px; }
 .desk-sheet .desk-num,
 .desk-sheet .vs-jump,

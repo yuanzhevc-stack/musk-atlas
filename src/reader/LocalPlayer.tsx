@@ -46,7 +46,10 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
       else v.currentTime = target;
     },
     play() {
-      video.current?.play().then(() => setPh("playing")).catch(() => setPh("blocked"));
+      const v = video.current;
+      const bound = clipRef.current;
+      if (v && bound && v.currentTime >= bound.end - 0.08) v.currentTime = bound.start;
+      v?.play().then(() => setPh("playing")).catch(() => setPh("blocked"));
     },
     pause() {
       video.current?.pause();
@@ -92,6 +95,24 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
     if (video.current) video.current.playbackRate = rate;
   }, [rate, src]);
 
+  // timeupdate is too sparse, and one pause() can be undone by a late play().
+  // Hold the file inside the current sentence on every frame.
+  useEffect(() => {
+    let frame = 0;
+    const tick = () => {
+      const node = video.current;
+      const bound = clipRef.current;
+      if (node && bound && node.currentTime >= bound.end - 0.08) {
+        const holdAt = Math.max(bound.start, bound.end - 0.05);
+        if (node.currentTime > holdAt + 0.03) node.currentTime = holdAt;
+        if (!node.paused) node.pause();
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [src]);
+
   const emit = () => {
     const node = video.current;
     const t = node?.currentTime;
@@ -111,6 +132,12 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
         onTimeUpdate={emit}
         onSeeked={emit}
         onPlay={() => setPh("playing")}
+        onPlaying={() => {
+          const node = video.current;
+          const bound = clipRef.current;
+          if (node && bound && clipReached(node.currentTime, bound.start, bound.end)) node.pause();
+          else setPh("playing");
+        }}
         onPause={() => setPh("paused")}
         onError={() => setPh("error")}
       />

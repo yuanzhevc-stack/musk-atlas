@@ -45,10 +45,13 @@
           .then(function (data) {
             var remote = data && typeof data.js === "string" ? data.js : "";
             if (!remote || remote.indexOf("..") !== -1 || !/\.js$/.test(remote) || /[\s"'<>]/.test(remote)) return;
-            if (src.indexOf(remote) !== -1) return;
-            var key = "musk-atlas:reload-for";
-            if (sessionStorage.getItem(key) === remote) return;
-            sessionStorage.setItem(key, remote);
+            if (src.indexOf(remote) !== -1) {
+              sessionStorage.removeItem("musk-atlas:reload-n");
+              return;
+            }
+            var n = Number(sessionStorage.getItem("musk-atlas:reload-n") || "0");
+            if (n >= 3) return;
+            sessionStorage.setItem("musk-atlas:reload-n", String(n + 1));
             var url = new URL(location.href);
             url.searchParams.set("v", (remote.split("/").pop() || "next").replace(/[^a-zA-Z0-9._-]/g, ""));
             location.replace(url.toString());

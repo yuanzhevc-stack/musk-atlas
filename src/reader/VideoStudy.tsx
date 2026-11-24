@@ -14,7 +14,7 @@ import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAud
 import { readNote, writeNote } from "./lessonNotes";
 import { followAllowed, lessonMedia, lyricScroll, sentenceAt, sentenceSpan, shouldRecenter } from "./sync";
 import { YoutubePlayer, type PlayerHandle, type PlayerPhase } from "./YoutubePlayer";
-import { captionsToLesson, clockOf, fetchCaptions, watchUrl } from "./youtube";
+import { captionsToLesson, clockOf, fetchCaptions, sentenceCase, watchUrl } from "./youtube";
 import { toast } from "../ui/Toast";
 
 type Sel = { from: number; to: number };
@@ -514,6 +514,8 @@ export function VideoStudy({
   useEffect(() => {
     let live = true;
     const v = yt.v;
+    const cased = lesson.text.split("\n").map((line) => sentenceCase(line)).join("\n");
+    if (cased !== lesson.text) reader.updateLesson(lesson.id, { text: cased });
     void fetchCaptions(v)
       .then((c) => {
         if (!live) return;
