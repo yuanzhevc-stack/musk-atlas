@@ -116,6 +116,23 @@ test("claim is secret-only and stops after two attempts", async () => {
   assert.equal(job.attempts, MAX_ATTEMPTS);
 });
 
+test("a download stuck on running is queued again and can be claimed", async () => {
+  const b = bucket();
+  await enqueue(b, id, 1_000, "configured", "manual");
+  const running = await claim(b, 2_000);
+  assert.equal(running?.status, "running");
+  const stuck = JSON.parse(b.store.get(`full/jobs/${id}.json`)!) as { origin?: string; updated: number };
+  delete stuck.origin;
+  stuck.updated = 2_000;
+  b.store.set(`full/jobs/${id}.json`, JSON.stringify(stuck));
+  const again = await enqueue(b, id, 2_000 + 21 * 60 * 1000, "configured", "manual");
+  assert.equal(again.job.status, "queued");
+  assert.equal(again.job.origin, "manual");
+  const claimed = await claim(b, 2_000 + 21 * 60 * 1000);
+  assert.equal(claimed?.v, id);
+  assert.equal(claimed?.status, "running");
+});
+
 test("ready requires the real object, not a sentence clip", async () => {
   const b = bucket();
   await enqueue(b, "cdZZpaB2kDM", 1_000, "configured", "manual");

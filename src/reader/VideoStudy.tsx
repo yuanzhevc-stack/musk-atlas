@@ -7,7 +7,7 @@ import { normalize, phraseIndex, reader } from "./model";
 import { ecdict, translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
 import { saveChoice, type SourceChoice } from "./hostedLesson";
-import { adoptReady, cacheStatusLine, forgetReady, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
+import { adoptReady, cacheStatusLine, enqueueFullCache, forgetReady, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
 import { DESK_MODES, MODE_LABEL, clipReached, dragPhrase, keptCaption, loopDecision, loopRange, nextSpeed, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, showsChinese, type DeskMode, type RowDisclosure } from "./lessonDesk";
 import { LessonPractice } from "./LessonPractice";
 import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAudio";
@@ -595,9 +595,15 @@ export function VideoStudy({
   phaseRef.current = phase;
   useEffect(() => {
     let stop = false;
+    let woken = false;
     const tick = async () => {
-      const next = await readFullCache(yt.v);
+      let next = await readFullCache(yt.v);
       if (stop) return;
+      if (next.status === "running" && !next.verified && !woken) {
+        woken = true;
+        next = await enqueueFullCache(yt.v);
+        if (stop) return;
+      }
       setJob(next);
       const now = phaseRef.current;
       const phaseKind = now === "loading" || now === "playing" || now === "paused" ? now : "other";

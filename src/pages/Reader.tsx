@@ -11,7 +11,7 @@ import { lessonStats, normalize, parse, phraseIndex, reader, useReader, type Con
 import { lessonMedia } from "../reader/sync";
 import { VideoStudy } from "../reader/VideoStudy";
 import { gsel } from "../reader/select";
-import { captionsToLesson, clockOf, fetchCaptions, watchUrl, youtubeId } from "../reader/youtube";
+import { captionsToLesson, clockOf, fetchCaptions, watchUrl, youtubeIdIn } from "../reader/youtube";
 import { retryFullCache } from "../reader/fullCache";
 import { Sheet } from "../ui/Sheet";
 import { toast } from "../ui/Toast";
@@ -99,9 +99,8 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  // A YouTube link in 来源链接, or pasted alone into 正文, imports its captions.
-  const textId = text.trim() && !/\s/.test(text.trim()) ? youtubeId(text) : null;
-  const vid = textId ?? (!text.trim() ? youtubeId(url) : null);
+  // Any YouTube id in the link or the pasted text becomes a video lesson, same as the ones already on the desk.
+  const vid = youtubeIdIn(url) || youtubeIdIn(text);
   const ok = !busy && (!!vid || text.trim().length > 0);
   const reset = () => {
     setTitle("");
@@ -155,7 +154,7 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
         ) : null}
         <label>
           <span>正文</span>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="粘贴英文文本，或一个 YouTube 链接…" rows={vid && !textId ? 4 : 9} data-testid="import-text" />
+          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="粘贴英文文本，或一个 YouTube 链接…" rows={vid ? 4 : 9} data-testid="import-text" />
         </label>
         {err && <p className="rd-err" data-testid="import-err">{err}</p>}
         <button className="rd-btn rd-btn-primary" disabled={!ok} onClick={() => void submit()} data-testid="import-save">
@@ -170,7 +169,6 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
 
 const isWord = (t: Token) => !!t.key;
 const VIEW_KEY = "musk-atlas:reader:view";
-const STUDY_KEY = "musk-atlas:reader:study";
 const TR_KEY = "musk-atlas:reader:tr";
 const statusClass = (it?: Item) => (!it ? "s-new" : it.status === 5 ? "s-known" : it.status === -1 ? "s-ign" : `s-${it.status}`);
 
@@ -189,15 +187,37 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   const [autoMusk, setAutoMusk] = useState(0);
   const [video, setVideo] = useState<{ t: number; n: number } | null>(null);
   const [mode, setModeRaw] = useState<"sentence" | "page">(() => (localStorage.getItem(VIEW_KEY) === "page" ? "page" : "sentence"));
-  const [study, setStudy] = useState<"video" | "read">(() => (!lesson.yt || localStorage.getItem(STUDY_KEY) === "read" ? "read" : "video"));
+  const [study, setStudy] = useState<"video" | "read">(() => (lesson.yt || youtubeIdIn(`${lesson.url ?? ""}\n${lesson.text}`) ? "video" : "read"));
   useEffect(() => {
-    const toRead = () => {
-      localStorage.setItem(STUDY_KEY, "read");
-      setStudy("read");
-    };
+    const toRead = () => setStudy("read");
     window.addEventListener("musk-atlas:study-read", toRead);
     return () => window.removeEventListener("musk-atlas:study-read", toRead);
   }, []);
+  useEffect(() => {
+    if (lesson.yt?.v) return;
+    const id = youtubeIdIn(`${lesson.url ?? ""}\n${lesson.text}`);
+    if (!id) return;
+    let live = true;
+    void fetchCaptions(id)
+      .then((c) => {
+        if (!live) return;
+        const next = captionsToLesson(c);
+        if (!next.text.trim() || !next.times.length) return;
+        reader.updateLesson(lesson.id, {
+          url: watchUrl(id),
+          text: next.text,
+          yt: { v: id, times: next.times, kind: c.kind, author: c.author },
+        });
+        setStudy("video");
+        void retryFullCache(id);
+      })
+      .catch(() => {
+        /* a text lesson with no public captions stays on the reader */
+      });
+    return () => {
+      live = false;
+    };
+  }, [lesson.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [cur, setCur] = useState(() => {
     const n = doc.sentences.length;
     const want = focusSid ?? lesson.sid ?? doc.paragraphs[doc.pages[Math.max(0, startPage)]?.from ?? 0]?.tokens[0]?.sid ?? 0;
@@ -546,7 +566,6 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
                 aria-selected={study === "video"}
                 className={study === "video" ? "is-on" : ""}
                 onClick={() => {
-                  localStorage.setItem(STUDY_KEY, "video");
                   tts.stop();
                   setStudy("video");
                 }}
@@ -559,10 +578,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
                 role="tab"
                 aria-selected={study === "read"}
                 className={study === "read" ? "is-on" : ""}
-                onClick={() => {
-                  localStorage.setItem(STUDY_KEY, "read");
-                  setStudy("read");
-                }}
+                onClick={() => setStudy("read")}
                 data-testid="study-read"
               >
                 阅读

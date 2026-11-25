@@ -30,6 +30,18 @@ export function youtubeId(input: string): string | null {
   return null;
 }
 
+/** A YouTube id anywhere in a note, a source link, or a pasted paragraph. */
+export function youtubeIdIn(input: string): string | null {
+  const direct = youtubeId(input);
+  if (direct) return direct;
+  const parts = input.match(/https?:\/\/[^\s)]+|youtu\.be\/[A-Za-z0-9_-]{11}/gi) ?? [];
+  for (const part of parts) {
+    const id = youtubeId(part);
+    if (id) return id;
+  }
+  return null;
+}
+
 const ERR: Record<string, string> = {
   no_captions: "这个视频没有字幕",
   no_english: "这个视频没有英文字幕",

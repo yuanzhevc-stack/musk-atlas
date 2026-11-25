@@ -184,6 +184,16 @@ export async function enqueue(bucket: JobBucket, v: string, now: number, runner:
     await writeJob(bucket, existing);
     return { status: 200, job: existing };
   }
+  if (existing && existing.status === "running" && now - existing.updated > STALE_MS) {
+    existing.status = "queued";
+    existing.origin = "manual";
+    existing.updated = now;
+    existing.runner = runner;
+    existing.error = undefined;
+    if (existing.attempts >= MAX_ATTEMPTS) existing.attempts = Math.max(0, MAX_ATTEMPTS - 1);
+    await writeJob(bucket, existing);
+    return { status: 200, job: existing };
+  }
   if (existing && (existing.status === "queued" || existing.status === "running" || existing.status === "ready" || existing.status === "refused")) {
     return { status: 200, job: { ...existing, runner } };
   }
@@ -262,9 +272,10 @@ export async function claim(bucket: JobBucket, now: number): Promise<FullJob | n
   jobs.sort((a, b) => a.created - b.created);
   const manual = (j: FullJob) => j.origin === "manual";
   const queued = jobs.find((j) => manual(j) && j.status === "queued" && j.attempts < MAX_ATTEMPTS);
-  const stale = jobs.find((j) => manual(j) && j.status === "running" && now - j.updated > STALE_MS && j.attempts < MAX_ATTEMPTS);
+  const stale = jobs.find((j) => (j.origin === "manual" || j.origin == null) && j.status === "running" && now - j.updated > STALE_MS && j.attempts < MAX_ATTEMPTS);
   const job = queued ?? stale;
   if (!job) return null;
+  if (!job.origin) job.origin = "manual";
   if (job.status === "queued") job.attempts += 1;
   job.status = "running";
   job.updated = now;

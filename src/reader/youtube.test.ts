@@ -68,6 +68,13 @@ test("all-caps captions become sentence case and normal captions stay", async ()
   assert.equal(sentenceCase("Elon already wrote this in normal case."), "Elon already wrote this in normal case.");
 });
 
+test("a youtube link buried in a note is still the video id", async () => {
+  const { youtubeIdIn } = await import("./youtube.ts");
+  assert.equal(youtubeIdIn("notes https://www.youtube.com/watch?v=kmyvBlKYfic more"), "kmyvBlKYfic");
+  assert.equal(youtubeIdIn("https://youtu.be/d5RKW3WSEb0"), "d5RKW3WSEb0");
+  assert.equal(youtubeIdIn("just a transcript with no link"), null);
+});
+
 test("caption errors stay specific when YouTube blocks the fetch", async () => {
   const { captionErrorMessage } = await import("./youtube.ts");
   assert.equal(captionErrorMessage("no_captions", 404), "这个视频没有字幕");
