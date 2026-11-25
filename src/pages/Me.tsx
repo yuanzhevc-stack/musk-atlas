@@ -1,6 +1,7 @@
 import { Download, RotateCcw, Upload } from "lucide-react";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useAtlas } from "../atlas/context";
+import { signIn, signOut, useAccount } from "../reader/cloud";
 import { isMastered } from "../store/srs";
 import { dayKey, exportBackup, importBackup, resetProgress, store, useStore, type Settings } from "../store/store";
 import { toast } from "../ui/Toast";
@@ -47,6 +48,24 @@ export function Me({ privateAvailable }: { privateAvailable: boolean }) {
     toast(r.ok ? `已恢复 ${r.cards} 个词的记忆` : r.error, r.ok ? "ok" : "warn");
   };
   const maxF = Math.max(1, ...stats.forecast);
+  const account = useAccount();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [accountError, setAccountError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submitAccount = async () => {
+    setBusy(true);
+    setAccountError("");
+    try {
+      await signIn(email, password, mode);
+      setPassword("");
+    } catch (e) {
+      setAccountError(e instanceof Error ? e.message : "没能登录。");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="page me">
@@ -88,6 +107,41 @@ export function Me({ privateAvailable }: { privateAvailable: boolean }) {
       </section>
 
       <div className="me-grid">
+        <section className="panel settings">
+          <h3 className="eyebrow">账号</h3>
+          {account.session ? (
+            <>
+              <p>
+                {account.session.email}
+                {account.status === "syncing" ? " · 正在同步" : account.status === "error" ? ` · ${account.detail}` : " · 课、生词和笔记在这个账号里"}
+              </p>
+              <button className="btn btn-ghost" type="button" onClick={() => void signOut()}>
+                退出
+              </button>
+            </>
+          ) : (
+            <form
+              className="account-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void submitAccount();
+              }}
+            >
+              <p>还没登录。现在的课只在这台浏览器里，换一台就对不上。</p>
+              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="username" placeholder="邮箱" aria-label="邮箱" required />
+              <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} placeholder="密码，至少 8 位" aria-label="密码" required minLength={8} />
+              {accountError && <p>{accountError}</p>}
+              <div className="segmented">
+                <button className="btn btn-primary" type="submit" disabled={busy}>
+                  {busy ? "请稍等" : mode === "register" ? "注册" : "登录"}
+                </button>
+                <button type="button" onClick={() => setMode(mode === "login" ? "register" : "login")}>
+                  {mode === "login" ? "没有账号，去注册" : "已有账号，去登录"}
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
         <section className="panel">
           <h3 className="eyebrow">过去 20 周</h3>
           <Heatmap days={progress.days} />

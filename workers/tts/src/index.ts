@@ -1,3 +1,4 @@
+import { handleAccount } from "./account";
 import { handleCaptions } from "./captions";
 import { handleExpress } from "./express";
 import { handleFullCache } from "./fullCache";
@@ -8,7 +9,7 @@ import { handleFullCache } from "./fullCache";
  * POST /express { q, context? } -> one English expression for a Chinese paraphrase (same XAI_API_KEY, separate budget).
  * GET /captions?v=<videoId> -> { v, title, lang, kind, segs:[[ms, durMs, text]] } — public YouTube captions
  * (manual English first, then auto; the transcript panel when player clients are bot-checked).
- * No cookies or accounts. Cached in R2 at yt/<id>.json.
+ * No cookies. Study data for a signed-in account lives in R2 under acct/. The browser only keeps the session token.
  */
 interface Env {
   BUCKET: R2Bucket;
@@ -79,7 +80,7 @@ function asJobBucket(bucket: R2Bucket) {
 const cors = (origin: string) => ({
   "Access-Control-Allow-Origin": origin,
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
   "Access-Control-Expose-Headers": "X-TTS-Cache, X-TTS-Voice",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
@@ -100,6 +101,7 @@ export default {
     if (!ORIGINS.has(origin)) return new Response("forbidden", { status: 403 });
     const h = cors(origin);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: h });
+    if (url.pathname.startsWith("/auth/") || url.pathname === "/library") return handleAccount(req, env.BUCKET, h, Date.now());
     if (url.pathname.startsWith("/full/")) return handleFullCache(req, asJobBucket(env.BUCKET), h, { secret: env.CACHE_JOB_SECRET ?? "", now: Date.now() });
     if (url.pathname === "/captions" && req.method === "GET") return handleCaptions(url, env, h);
     if (url.pathname === "/express") {

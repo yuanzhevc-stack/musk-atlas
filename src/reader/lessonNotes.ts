@@ -17,6 +17,25 @@ function read(): Store {
 }
 
 const idOf = (lessonId: string, sid: number) => `${lessonId}:${sid}`;
+let afterNote: (() => void) | null = null;
+
+export function onNotesCommit(fn: (() => void) | null) {
+  afterNote = fn;
+}
+
+export function allNotes(): Record<string, string> {
+  return { ...read().notes };
+}
+
+export function replaceNotes(notes: Record<string, string>) {
+  const clean: Record<string, string> = {};
+  for (const [k, v] of Object.entries(notes)) if (typeof v === "string" && v.trim()) clean[k] = v.slice(0, 2000);
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ version: 1, notes: clean }));
+  } catch {
+    /* keep the previous notes */
+  }
+}
 
 export function readNote(lessonId: string, sid: number): string {
   const text = read().notes[idOf(lessonId, sid)];
@@ -34,4 +53,5 @@ export function writeNote(lessonId: string, sid: number, text: string) {
   } catch {
     /* the note stays in the field until the next successful write */
   }
+  afterNote?.();
 }

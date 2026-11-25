@@ -7,6 +7,7 @@ import { muskLookup } from "../reader/MuskSays";
 import { prefetch, RATES, tts, useTts } from "../reader/tts";
 import { StatusPicker, WordCard, type Sel } from "../reader/WordCard";
 export { StatusPicker };
+import { useAccount } from "../reader/cloud";
 import { lessonStats, normalize, parse, phraseIndex, reader, useReader, type Context, type Item, type Lesson, type Status, type Token } from "../reader/model";
 import { lessonMedia } from "../reader/sync";
 import { VideoStudy } from "../reader/VideoStudy";
@@ -36,6 +37,7 @@ export function ReaderPage({ l, s }: { l?: string; s?: string }) {
 
 function Library({ missing }: { missing: boolean }) {
   const st = useReader();
+  const account = useAccount();
   const [importing, setImporting] = useState(false);
   return (
     <div className="page rd-page">
@@ -45,7 +47,9 @@ function Library({ missing }: { missing: boolean }) {
           <h1 className="rd-title">课程</h1>
         </div>
       </header>
-      {missing && <p className="rd-dim">这节课不在这台设备上（数据存在本机浏览器）。</p>}
+      {missing && <p className="rd-dim">这节课不在这个账号里。</p>}
+      {!account.session && <p className="rd-dim">还没登录。这些课只在这台浏览器，到「我的」登录后才会跟着账号走。</p>}
+      {account.session && account.status === "error" && <p className="rd-dim">{account.detail}</p>}
       <div className="rd-lib">
         <button className="rd-card rd-card-new" onClick={() => setImporting(true)} data-testid="import-open">
           <Plus size={22} />

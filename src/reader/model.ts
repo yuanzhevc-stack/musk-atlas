@@ -81,7 +81,8 @@ let state: State = (() => {
   }
 })();
 const subs = new Set<() => void>();
-function commit(next: State) {
+let afterCommit: ((state: State) => void) | null = null;
+function commit(next: State, echo = true) {
   state = next;
   try {
     localStorage.setItem(KEY, JSON.stringify(state));
@@ -89,12 +90,27 @@ function commit(next: State) {
     /* quota: keep in memory */
   }
   subs.forEach((f) => f());
+  if (echo) afterCommit?.(state);
 }
 const subscribe = (f: () => void) => {
   subs.add(f);
   return () => subs.delete(f);
 };
 export const useReader = () => useSyncExternalStore(subscribe, () => state);
+
+/** The signed-in library calls this after a local change. Hydration passes echo=false. */
+export function onLibraryCommit(fn: ((state: State) => void) | null) {
+  afterCommit = fn;
+}
+
+export function replaceLibrary(next: { lessons: Lesson[]; items: Record<string, Item> }) {
+  const lessons = Array.isArray(next.lessons) ? next.lessons.filter((l) => l && typeof l.id === "string" && typeof l.text === "string") : [];
+  const items: Record<string, Item> = {};
+  for (const [k, v] of Object.entries(next.items ?? {})) {
+    if (v && typeof v === "object" && typeof v.text === "string") items[k] = v;
+  }
+  commit({ version: 1, lessons, items }, false);
+}
 
 export const normalize = (s: string) =>
   s

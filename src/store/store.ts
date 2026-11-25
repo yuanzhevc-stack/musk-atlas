@@ -195,6 +195,22 @@ let saveTimer: number | undefined;
 let dirty = false;
 /** Progress is written only after it has been read from storage for this dataset. */
 let loadedId: string | null = null;
+let dirtyProgress = false;
+let afterProgress: (() => void) | null = null;
+
+export function onProgressCommit(fn: (() => void) | null) {
+  afterProgress = fn;
+}
+
+export function replaceProgress(raw: unknown) {
+  const progress = sanitizeProgress(raw, state.progress.datasetId);
+  state = { ...state, progress };
+  loadedId = progress.datasetId;
+  write(progressKey(progress.datasetId), progress);
+  dirty = false;
+  dirtyProgress = false;
+  emit();
+}
 
 function emit() {
   listeners.forEach((l) => l());
@@ -209,13 +225,16 @@ function scheduleSave() {
 export function flush() {
   window.clearTimeout(saveTimer);
   if (!dirty) return;
+  const push = dirtyProgress;
   dirty = false;
+  dirtyProgress = false;
   const progressOk = loadedId !== state.progress.datasetId || write(progressKey(state.progress.datasetId), state.progress);
   const ok = progressOk && write(SETTINGS_KEY, state.settings);
   if (ok === state.saveError) {
     state = { ...state, saveError: !ok };
     emit();
   }
+  if (push) afterProgress?.();
 }
 
 if (typeof window !== "undefined") {
@@ -251,6 +270,7 @@ export const store = {
   progress(fn: (p: Progress) => Progress) {
     state = { ...state, progress: fn(state.progress) };
     emit();
+    dirtyProgress = true;
     scheduleSave();
   },
   settings(patch: Partial<Settings>) {
@@ -293,6 +313,7 @@ export function exportBackup() {
 
 function markDirty() {
   dirty = true;
+  dirtyProgress = true;
 }
 
 export function importBackup(text: string): { ok: true; cards: number } | { ok: false; error: string } {

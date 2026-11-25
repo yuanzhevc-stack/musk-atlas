@@ -3213,6 +3213,8 @@ code {
   display: grid;
   gap: 16px;
 }
+.account-form { display: grid; gap: 10px; max-width: 420px; }
+.account-form input { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: transparent; }
 @media (min-width: 900px) {
   .me-grid {
     grid-template-columns: 1fr 1fr;
