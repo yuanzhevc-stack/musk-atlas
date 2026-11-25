@@ -6,7 +6,7 @@
 
 export const YT_ID = /^[A-Za-z0-9_-]{11}$/;
 export const MAX_ATTEMPTS = 2;
-export const DAILY_NEW = 6;
+export const DAILY_NEW = 24;
 /** Explicit retries of a terminal manual failure. Polling does not spend these. */
 export const MAX_MANUAL_RETRIES = 2;
 export const DAILY_RETRIES = 6;
