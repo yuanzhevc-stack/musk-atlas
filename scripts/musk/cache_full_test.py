@@ -8,7 +8,7 @@ from unittest import mock
 
 import cache_full
 import seed_full
-from cache_full import APP_USER_AGENT, MANUAL_FORMAT, SCRIPT_BUILD, WORKER_HOST, classify_ytdlp, dependency_problem, failure_code, loop_delay, parse_progress, post, put_part, run_mode, upload_via_worker, worker_is_manual_720, worker_request, ytdlp_command
+from cache_full import APP_USER_AGENT, MANUAL_FORMAT, SCRIPT_BUILD, WORKER_HOST, classify_ytdlp, cookies_path, dependency_problem, failure_code, loop_delay, parse_progress, post, put_part, run_mode, upload_via_worker, worker_is_manual_720, worker_request, ytdlp_command
 
 SECRET = "unit-secret-not-real"
 BASE = f"https://{WORKER_HOST}"
@@ -112,6 +112,24 @@ class WorkerClient(unittest.TestCase):
         self.assertNotIn("Mozilla", joined)
         self.assertNotIn(APP_USER_AGENT, joined)
         self.assertIn("https://www.youtube.com/watch?v=s9mczdODqzo", command)
+
+    def test_cookies_file_is_passed_without_being_printed(self):
+        secret = "SESSION_COOKIE_VALUE_DO_NOT_PRINT"
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as handle:
+            handle.write(f"# Netscape\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\t{secret}\n")
+            path = handle.name
+        try:
+            with mock.patch.dict(os.environ, {"YT_COOKIES": path}):
+                self.assertEqual(cookies_path(), path)
+                command = ytdlp_command("s9mczdODqzo", "/tmp/s9mczdODqzo.mp4")
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    print(" ".join(command))
+            self.assertEqual(command[command.index("--cookies") + 1], path)
+            self.assertNotIn(secret, buf.getvalue())
+            self.assertNotIn("--cookies-from-browser", command)
+        finally:
+            os.unlink(path)
 
     def test_idle_queue_waits_half_a_minute(self):
         self.assertEqual(loop_delay(0), 60)

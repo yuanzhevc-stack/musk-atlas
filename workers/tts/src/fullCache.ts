@@ -444,6 +444,7 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
   }
   if (url.pathname === "/full/claim") {
     if (req.method !== "POST") return json({ error: "method" }, 405, headers);
+    if (req.headers.get("X-Cache-Script") !== "3") return json({ job: null }, 200, headers);
     const job = await claim(bucket, opts.now);
     return json({ job }, 200, headers);
   }

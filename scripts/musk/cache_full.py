@@ -2,7 +2,8 @@
 """Download one full YouTube lesson and store it on the existing R2 bucket.
 
 This runs on a machine the parent starts. It is not a Cloudflare Worker and not
-this cloud VM. It does not use cookies, proxies, or a private YouTube client.
+this cloud VM. It does not use a proxy or a private YouTube client.
+A logged-in session is read only from the YT_COOKIES file on this machine.
 
 Environment:
   CACHE_WORKER_URL   https://musk-atlas-tts.yuanzhevc.workers.dev
@@ -41,7 +42,7 @@ MIN_SECONDS = 20
 # https://developers.cloudflare.com/workers/configuration/routing/workers-dev/
 APP_USER_AGENT = "musk-atlas-cache/1.0 (+https://yuanzhevc-stack.github.io/musk-atlas/)"
 WORKER_HOST = "musk-atlas-tts.yuanzhevc.workers.dev"
-SCRIPT_BUILD = "2"
+SCRIPT_BUILD = "3"
 REFUSED_MARKS = ("sign in to confirm", "not a bot", "login required", "confirm you’re not a bot", "confirm you're not a bot")
 
 
@@ -138,8 +139,21 @@ def report_progress(worker: str, secret: str, video_id: str, phase: str, receive
         return
 
 
+def cookies_path() -> str | None:
+    """A Netscape cookies file already on this machine. Never printed, never sent anywhere except yt-dlp."""
+    path = os.environ.get("YT_COOKIES", "").strip()
+    if not path:
+        return None
+    try:
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            return path
+    except OSError:
+        return None
+    return None
+
+
 def ytdlp_command(video_id: str, target: str) -> list[str]:
-    return [
+    command = [
         "yt-dlp",
         "--no-playlist",
         "--no-cache-dir",
@@ -158,8 +172,12 @@ def ytdlp_command(video_id: str, target: str) -> list[str]:
         "--newline",
         "--js-runtimes",
         "deno",
-        f"https://www.youtube.com/watch?v={video_id}",
     ]
+    cookies = cookies_path()
+    if cookies:
+        command.extend(["--cookies", cookies])
+    command.append(f"https://www.youtube.com/watch?v={video_id}")
+    return command
 
 
 def download_lesson(video_id: str, target: str, on_progress) -> tuple[int, str]:
@@ -357,6 +375,12 @@ def main() -> int:
         return 1
     while True:
         try:
+            if cookies_path() is None:
+                print("YT_COOKIES is missing or empty, not claiming.", file=sys.stderr)
+                if mode != "manual-loop":
+                    return 1
+                time.sleep(loop_delay(5))
+                continue
             if not require_manual_worker(worker, secret):
                 if mode != "manual-loop":
                     return 3
