@@ -20,11 +20,12 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
   const onDurationRef = useRef(onDuration);
   const clipRef = useRef(clip);
   const initialRef = useRef(initial);
+  const seekGuard = useRef(0);
   const [phase, setPhase] = useState<PlayerPhase>("loading");
   onTimeRef.current = onTime;
   onPhaseRef.current = onPhase;
   onDurationRef.current = onDuration;
-  clipRef.current = clip;
+  if (performance.now() >= seekGuard.current) clipRef.current = clip;
 
   const setPh = (next: PlayerPhase) => {
     setPhase(next);
@@ -32,23 +33,19 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
   };
 
   useImperativeHandle(ref, () => ({
-    seek(seconds: number) {
+    seek(seconds: number, nextClip?: { start: number; end: number } | null) {
       const v = video.current;
       if (!v) return;
+      if (nextClip !== undefined) clipRef.current = nextClip;
       const target = Math.max(0, seconds);
       initialRef.current = target;
-      if (Math.abs((v.currentTime || 0) - target) < 0.08) {
-        if (v.paused) void v.play().catch(() => setPh("blocked"));
-        return;
-      }
-      const fast = (v as HTMLVideoElement & { fastSeek?: (t: number) => void }).fastSeek;
-      if (typeof fast === "function") fast.call(v, target);
-      else v.currentTime = target;
+      seekGuard.current = performance.now() + 700;
+      v.currentTime = target;
     },
     play() {
       const v = video.current;
       const bound = clipRef.current;
-      if (v && bound && v.currentTime >= bound.end - 0.08) v.currentTime = bound.start;
+      if (v && bound && v.currentTime >= bound.end - 0.08 && v.currentTime <= bound.end + 0.2) v.currentTime = bound.start;
       v?.play().then(() => setPh("playing")).catch(() => setPh("blocked"));
     },
     pause() {
@@ -102,6 +99,10 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
     const tick = () => {
       const node = video.current;
       const bound = clipRef.current;
+      if (!node || !bound || performance.now() < seekGuard.current) {
+        frame = requestAnimationFrame(tick);
+        return;
+      }
       if (node && bound && node.currentTime >= bound.end - 0.08) {
         const holdAt = Math.max(bound.start, bound.end - 0.05);
         if (node.currentTime > holdAt + 0.03) node.currentTime = holdAt;
@@ -117,7 +118,7 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
     const node = video.current;
     const t = node?.currentTime;
     const bound = clipRef.current;
-    if (node && typeof t === "number" && bound && clipReached(t, bound.start, bound.end)) node.pause();
+    if (node && typeof t === "number" && bound && performance.now() >= seekGuard.current && clipReached(t, bound.start, bound.end)) node.pause();
     if (typeof t === "number" && Number.isFinite(t)) onTimeRef.current?.(t);
   };
 
@@ -135,7 +136,7 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
         onPlaying={() => {
           const node = video.current;
           const bound = clipRef.current;
-          if (node && bound && clipReached(node.currentTime, bound.start, bound.end)) node.pause();
+          if (node && bound && performance.now() >= seekGuard.current && clipReached(node.currentTime, bound.start, bound.end)) node.pause();
           else setPh("playing");
         }}
         onPause={() => setPh("paused")}

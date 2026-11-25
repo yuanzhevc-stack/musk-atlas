@@ -7,7 +7,7 @@ import { clipReached } from "./lessonDesk";
 export type PlayerPhase = StartupPhase;
 
 export interface PlayerHandle {
-  seek: (seconds: number) => void;
+  seek: (seconds: number, clip?: { start: number; end: number } | null) => void;
   play: () => void;
   pause: () => void;
   toggle: () => void;
@@ -101,13 +101,14 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
   const onDurationRef = useRef(onDuration);
   const clipRef = useRef(clip);
   const phaseRef = useRef<PlayerPhase>("loading");
+  const seekGuard = useRef(0);
   const [phase, setPhase] = useState<PlayerPhase>("loading");
   const [detail, setDetail] = useState("");
   const [attempt, setAttempt] = useState(0);
   onTimeRef.current = onTime;
   onPhaseRef.current = onPhase;
   onDurationRef.current = onDuration;
-  clipRef.current = clip;
+  if (performance.now() >= seekGuard.current) clipRef.current = clip;
 
   const setPh = (next: PlayerPhase, text = "") => {
     phaseRef.current = next;
@@ -117,8 +118,10 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
   };
 
   useImperativeHandle(ref, () => ({
-    seek(seconds: number) {
+    seek(seconds: number, nextClip?: { start: number; end: number } | null) {
+      if (nextClip !== undefined) clipRef.current = nextClip;
       initialRef.current = seconds;
+      seekGuard.current = performance.now() + 700;
       try {
         player.current?.seekTo(seconds, true);
       } catch {
@@ -129,7 +132,7 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
       try {
         const bound = clipRef.current;
         const t = player.current?.getCurrentTime?.();
-        if (bound && typeof t === "number" && t >= bound.end - 0.08) player.current?.seekTo(bound.start, true);
+        if (bound && typeof t === "number" && t >= bound.end - 0.08 && t <= bound.end + 0.2) player.current?.seekTo(bound.start, true);
         player.current?.playVideo();
       } catch {
         /* player not ready */
@@ -256,7 +259,7 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
                       const dur = player.current?.getDuration?.();
                       if (typeof dur === "number" && Number.isFinite(dur) && dur > 0) onDurationRef.current?.(dur);
                       const bound = clipRef.current;
-                      if (typeof t === "number" && bound && clipReached(t, bound.start, bound.end)) {
+                      if (typeof t === "number" && bound && performance.now() >= seekGuard.current && clipReached(t, bound.start, bound.end)) {
                         try {
                           player.current?.pauseVideo();
                         } catch {
@@ -312,7 +315,7 @@ export const YoutubePlayer = forwardRef<PlayerHandle, {
     const id = window.setInterval(() => {
       const bound = clipRef.current;
       const node = player.current;
-      if (!bound || !node?.getCurrentTime) return;
+      if (!bound || !node?.getCurrentTime || performance.now() < seekGuard.current) return;
       let t = 0;
       try {
         t = node.getCurrentTime();

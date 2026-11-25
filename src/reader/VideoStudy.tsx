@@ -266,8 +266,10 @@ export function VideoStudy({
     window.clearTimeout(holdTimer.current);
     setHeld(false);
     setSel(null);
+    curRef.current = sid;
     setCur(sid);
-    player.current?.seek(t);
+    const cue = pauseAfter && !loopOn && pointA == null ? loopRange(timesRef.current, sid, sid) : null;
+    player.current?.seek(t, cue);
     player.current?.play();
   };
   const replay = () => {
@@ -548,6 +550,7 @@ export function VideoStudy({
   const onTime = (t: number) => {
     clock.current = t;
     setMediaClock((prev) => (Math.abs(prev - t) < 0.35 ? prev : t));
+    if (Date.now() < hold.current) return;
     const current = curRef.current;
     const times = timesRef.current;
     const looping = loopOn || pointA != null;
