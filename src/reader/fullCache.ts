@@ -22,6 +22,7 @@ export interface CacheView {
   fps?: number;
   vcodec?: string;
   acodec?: string;
+  progress?: { phase: "download" | "upload"; received: number; total?: number };
 }
 
 const JOB_KEY = "musk-atlas:full-job:v1";
@@ -106,6 +107,7 @@ function viewFrom(raw: Partial<CacheView> & { v?: string }, fallback: string): C
     fps: typeof raw.fps === "number" ? raw.fps : undefined,
     vcodec: typeof raw.vcodec === "string" ? raw.vcodec : undefined,
     acodec: typeof raw.acodec === "string" ? raw.acodec : undefined,
+    progress: progressOf(raw.progress),
   };
 }
 
@@ -113,6 +115,18 @@ function picture(view: CacheView): string {
   if (!view.height) return "";
   const codecs = [view.vcodec, view.acodec].filter(Boolean).join("/");
   return `实际 ${view.height}p${view.fps ? ` ${view.fps}fps` : ""}${codecs ? ` ${codecs}` : ""}`;
+}
+
+function progressOf(raw: CacheView["progress"] | undefined): CacheView["progress"] {
+  if (!raw || typeof raw.received !== "number" || raw.received < 0) return undefined;
+  const total = typeof raw.total === "number" && raw.total > 0 ? raw.total : undefined;
+  return { phase: raw.phase === "upload" ? "upload" : "download", received: raw.received, total };
+}
+
+/** 0–100 when the download has reported a size. Null means nothing is moving. */
+export function downloadPercent(progress: CacheView["progress"]): number | null {
+  if (!progress?.total) return null;
+  return Math.max(0, Math.min(100, Math.round((progress.received / progress.total) * 100)));
 }
 
 export function cacheStatusLine(view: CacheView | null, playingLocal: boolean): string {
@@ -123,7 +137,12 @@ export function cacheStatusLine(view: CacheView | null, playingLocal: boolean): 
   }
   if (view.status === "queued" && view.runner === "missing") return "已记下这节课。下载机还没接上，先用在线。";
   if (view.status === "queued") return "已排队。目标不超过 720p、优先 30 帧的 H.264/AAC。先用在线。";
-  if (view.status === "running") return "正在下载整段。先用在线。";
+  if (view.status === "running") {
+    const pct = downloadPercent(view.progress);
+    if (pct == null) return "下载停着，没有进度。先用在线。";
+    const what = view.progress?.phase === "upload" ? "正在上传" : "正在下载";
+    return `${what} ${pct}%。先用在线。`;
+  }
   if (view.status === "refused") return "YouTube 拒绝了下载。先用在线。不会绕过这个检查。";
   if (view.error === "daily-cap") return "今天的缓存额度用完了，先用在线。";
   if (view.error === "retry-cap") return "这节课的手动重试次数已经用完。先用在线。";

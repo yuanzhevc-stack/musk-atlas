@@ -8,7 +8,7 @@ from unittest import mock
 
 import cache_full
 import seed_full
-from cache_full import APP_USER_AGENT, MANUAL_FORMAT, WORKER_HOST, classify_ytdlp, dependency_problem, failure_code, post, put_part, run_mode, upload_via_worker, worker_is_manual_720, worker_request, ytdlp_command
+from cache_full import APP_USER_AGENT, MANUAL_FORMAT, WORKER_HOST, classify_ytdlp, dependency_problem, failure_code, parse_progress, post, put_part, run_mode, upload_via_worker, worker_is_manual_720, worker_request, ytdlp_command
 
 SECRET = "unit-secret-not-real"
 BASE = f"https://{WORKER_HOST}"
@@ -38,6 +38,8 @@ class Classify(unittest.TestCase):
         self.assertEqual(classify_ytdlp(0, ""), "downloaded")
         self.assertEqual(failure_code("ERROR: [youtube] HTTP Error 403"), "http-403")
         self.assertEqual(failure_code("ERROR: challenge solver requires yt-dlp-ejs"), "ejs-missing")
+        self.assertEqual(parse_progress("[download]  45.0% of 10.00MiB at 1.00MiB/s ETA 00:05"), (int(10 * 1024 * 1024 * 0.45), int(10 * 1024 * 1024)))
+        self.assertEqual(parse_progress("no progress here"), None)
         self.assertEqual(dependency_problem(ytdlp=True, ffmpeg=True, ffprobe=True, deno=True, ejs=False), "ejs-missing")
         self.assertEqual(dependency_problem(ytdlp=True, ffmpeg=True, ffprobe=True, deno=False, ejs=True), "deno-missing")
         self.assertIsNone(dependency_problem(ytdlp=True, ffmpeg=True, ffprobe=True, deno=True, ejs=True))
@@ -80,8 +82,8 @@ class WorkerClient(unittest.TestCase):
                 put_part(BASE, SECRET, "s9mczdODqzo", "upload-1", 1, b"abc", True)
         methods = [req.get_method() for req in seen]
         paths = [req.full_url.split(WORKER_HOST, 1)[1].split("?", 1)[0] for req in seen]
-        self.assertEqual(paths, ["/full/upload/start", "/full/upload/part", "/full/upload/complete", "/full/claim", "/full/result", "/full/upload/part"])
-        self.assertEqual(methods, ["POST", "PUT", "POST", "POST", "POST", "PUT"])
+        self.assertEqual(paths, ["/full/upload/start", "/full/upload/part", "/full/progress", "/full/upload/complete", "/full/claim", "/full/result", "/full/upload/part"])
+        self.assertEqual(methods, ["POST", "PUT", "POST", "POST", "POST", "POST", "PUT"])
         for req in seen:
             self.assert_app_request(req, req.get_method())
         self.assertNotIn(SECRET, buf.getvalue())
@@ -99,7 +101,7 @@ class WorkerClient(unittest.TestCase):
         self.assertIn("acodec^=mp4a", MANUAL_FORMAT)
         self.assertIn("res:720,fps:30,vcodec:h264,acodec:aac,ext:mp4", command)
         self.assertIn("Merger+ffmpeg:-c copy -movflags +faststart", command)
-        self.assertNotIn("--recode-video", command)
+        self.assertIn("--newline", command)
         self.assertNotIn("--cookies", command)
         self.assertNotIn("--proxy", command)
         self.assertNotIn("--user-agent", command)

@@ -7,7 +7,7 @@ import { normalize, phraseIndex, reader } from "./model";
 import { ecdict, translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
 import { saveChoice, type SourceChoice } from "./hostedLesson";
-import { adoptReady, cacheStatusLine, enqueueFullCache, forgetReady, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
+import { adoptReady, cacheStatusLine, downloadPercent, enqueueFullCache, forgetReady, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
 import { DESK_MODES, MODE_LABEL, clipReached, dragPhrase, keptCaption, loopDecision, loopRange, nextSpeed, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, showsChinese, type DeskMode, type RowDisclosure } from "./lessonDesk";
 import { LessonPractice } from "./LessonPractice";
 import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAudio";
@@ -637,6 +637,7 @@ export function VideoStudy({
   };
   const playDisabled = playingCache ? phase === "error" : phase === "embed" || phase === "missing" || phase === "error";
   const cacheLine = phase === "error" && source === "local" ? "缓存文件没有打开。可以改用在线。" : playingCache ? "本地 · 已缓存的整段" : cacheStatusLine(job, false);
+  const cachePct = !playingCache && job?.status === "running" ? downloadPercent(job.progress) : null;
 
   useEffect(() => {
     player.current?.setRate(speed);
@@ -813,6 +814,11 @@ export function VideoStudy({
         {!playingCache && job && (job.status !== "unknown" || job.runner === "unreachable") && (
           <p className="desk-cache" data-testid={phase === "error" ? "vs-local-name" : "vs-cache-status"}>
             {cacheLine}
+            {cachePct != null && (
+              <span className="desk-cache-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={cachePct} data-testid="cache-progress">
+                <i style={{ width: `${cachePct}%` }} />
+              </span>
+            )}
             {job.runner === "unreachable" || job.status === "unknown" || (job.status === "failed" && job.error !== "retry-cap") ? (
               <button type="button" data-testid="cache-retry" onClick={() => void retryFullCache(yt.v).then(setJob)}>再试一次</button>
             ) : null}

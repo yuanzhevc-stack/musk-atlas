@@ -45,6 +45,7 @@ export interface FullJob extends MediaFacts {
   /** How many times a person explicitly requeued a terminal failure. */
   manualRetries?: number;
   history?: { at: number; status: string; error?: string; attempts: number }[];
+  progress?: { phase: "download" | "upload"; received: number; total?: number };
 }
 
 export interface ReadyRecord extends MediaFacts {
@@ -284,6 +285,20 @@ export async function claim(bucket: JobBucket, now: number): Promise<FullJob | n
   return job;
 }
 
+export async function noteProgress(
+  bucket: JobBucket,
+  v: string,
+  now: number,
+  progress: { phase: "download" | "upload"; received: number; total?: number },
+): Promise<FullJob | null> {
+  const job = await readJob(bucket, v);
+  if (!job || job.status !== "running") return null;
+  job.progress = progress;
+  job.updated = now;
+  await writeJob(bucket, job);
+  return job;
+}
+
 export function acceptReady(headBytes: number | null, reportedBytes: number, duration: number): string | null {
   if (headBytes == null) return "missing-object";
   if (!Number.isFinite(reportedBytes) || reportedBytes !== headBytes) return "size-mismatch";
@@ -346,7 +361,7 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
   const authed = bearerOk(req.headers.get("Authorization"), opts.secret);
   const runner: FullJob["runner"] = opts.secret ? "configured" : "missing";
 
-  if (url.pathname === "/full/upload/start" || url.pathname === "/full/upload/part" || url.pathname === "/full/upload/complete" || url.pathname === "/full/claim" || url.pathname === "/full/result") {
+  if (url.pathname === "/full/upload/start" || url.pathname === "/full/upload/part" || url.pathname === "/full/upload/complete" || url.pathname === "/full/claim" || url.pathname === "/full/result" || url.pathname === "/full/progress") {
     if (!opts.secret) return json({ error: "runner-not-configured" }, 503, headers);
     if (!authed) return json({ error: "unauthorized" }, 401, headers);
   }
@@ -456,6 +471,23 @@ export async function handleFullCache(req: Request, bucket: JobBucket, headers: 
       acodec: typeof body.acodec === "string" ? body.acodec : undefined,
     });
     return json(result.job, result.status, headers);
+  }
+  if (url.pathname === "/full/progress") {
+    if (req.method !== "POST") return json({ error: "method" }, 405, headers);
+    let body: { v?: unknown; phase?: unknown; received?: unknown; total?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return json({ error: "bad-json" }, 400, headers);
+    }
+    const v = youtubeOnly(body.v);
+    const phase = body.phase === "upload" ? "upload" : body.phase === "download" ? "download" : null;
+    const received = typeof body.received === "number" && body.received >= 0 ? Math.floor(body.received) : null;
+    if (!v || !phase || received == null) return json({ error: "bad-video" }, 400, headers);
+    const total = typeof body.total === "number" && body.total > 0 ? Math.floor(body.total) : undefined;
+    const job = await noteProgress(bucket, v, opts.now, { phase, received, total });
+    if (!job) return json({ error: "no-job" }, 404, headers);
+    return json({ ...job, runner }, 200, headers);
   }
   if (url.pathname === "/full/jobs" && req.method === "GET") {
     const v = youtubeOnly(url.searchParams.get("v"));

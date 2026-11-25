@@ -11,6 +11,7 @@ import {
   retryManual,
   fullMediaUrl,
   handleFullCache,
+  noteProgress,
   report,
   youtubeOnly,
   type JobBucket,
@@ -131,6 +132,25 @@ test("a download stuck on running is queued again and can be claimed", async () 
   const claimed = await claim(b, 2_000 + 21 * 60 * 1000);
   assert.equal(claimed?.v, id);
   assert.equal(claimed?.status, "running");
+});
+
+test("progress is stored only while a download is running", async () => {
+  const b = bucket();
+  await enqueue(b, id, 1_000, "configured", "manual");
+  assert.equal(await noteProgress(b, id, 1_500, { phase: "download", received: 10, total: 100 }), null);
+  await claim(b, 2_000);
+  const noted = await noteProgress(b, id, 2_500, { phase: "download", received: 40, total: 100 });
+  assert.equal(noted?.progress?.received, 40);
+  const res = await handleFullCache(
+    new Request("https://worker.test/full/progress", { method: "POST", headers: { Authorization: "Bearer " + secret }, body: JSON.stringify({ v: id, phase: "download", received: 70, total: 100 }) }),
+    b,
+    headers,
+    { secret, now: 3_000 },
+  );
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.progress.received, 70);
+  assert.equal(body.progress.phase, "download");
 });
 
 test("ready requires the real object, not a sentence clip", async () => {

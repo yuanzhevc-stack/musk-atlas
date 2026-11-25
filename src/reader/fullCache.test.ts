@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { adoptReady, cacheStatusLine, enqueueFullCache, fullMediaUrl, openingSource, publicError, readFullCache, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
+import { adoptReady, cacheStatusLine, downloadPercent, enqueueFullCache, fullMediaUrl, openingSource, publicError, readFullCache, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
 
 const mem = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -61,6 +61,9 @@ test("enqueue sends only the video id and keeps a refusal", async () => {
   assert.equal(measured.includes("实际 720p"), false);
   assert.equal(/选择文件|上传/.test(cacheStatusLine(view, false)), false);
   assert.match(cacheStatusLine({ ...view, status: "failed", error: "ejs-missing" }, false), /yt-dlp-ejs/);
+  assert.equal(cacheStatusLine({ ...view, status: "running" }, false), "下载停着，没有进度。先用在线。");
+  assert.equal(cacheStatusLine({ ...view, status: "running", progress: { phase: "download", received: 42, total: 100 } }, false), "正在下载 42%。先用在线。");
+  assert.equal(downloadPercent({ phase: "upload", received: 8, total: 10 }), 80);
   assert.equal(publicError("boom bearer SECRETVALUE token=abc"), "boom");
   assert.equal(cacheStatusLine({ ...view, status: "failed", error: "bearer SECRETVALUE http-403" }, false).includes("SECRETVALUE"), false);
   let retryBody = "";

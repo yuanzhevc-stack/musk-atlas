@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -110,6 +111,32 @@ def run_mode(argv: list[str]) -> str:
     return "manual-loop" if "--loop" in argv else "manual-once"
 
 
+def parse_progress(line: str) -> tuple[int, int] | None:
+    """yt-dlp download line -> received bytes, total bytes. Percent-only lines use 100 as the total."""
+    match = re.search(r"\[download\]\s+(\d+(?:\.\d+)?)%", line)
+    if not match:
+        return None
+    pct = float(match.group(1))
+    size = re.search(r"of\s+~?\s*([\d.]+)\s*([KMGT]?i?B)", line, re.I)
+    units = {"b": 1, "kb": 1000, "mb": 1000**2, "gb": 1000**3, "kib": 1024, "mib": 1024**2, "gib": 1024**3}
+    if not size:
+        return int(pct), 100
+    total = int(float(size.group(1)) * units.get(size.group(2).lower(), 1))
+    if total <= 0:
+        return int(pct), 100
+    return int(total * pct / 100), total
+
+
+def report_progress(worker: str, secret: str, video_id: str, phase: str, received: int, total: int | None) -> None:
+    payload: dict = {"v": video_id, "phase": phase, "received": received}
+    if total:
+        payload["total"] = total
+    try:
+        post(worker.rstrip("/") + "/full/progress", secret, payload)
+    except Exception:
+        return
+
+
 def ytdlp_command(video_id: str, target: str) -> list[str]:
     return [
         "yt-dlp",
@@ -127,8 +154,24 @@ def ytdlp_command(video_id: str, target: str) -> list[str]:
         "Merger+ffmpeg:-c copy -movflags +faststart",
         "-o",
         target,
+        "--newline",
         f"https://www.youtube.com/watch?v={video_id}",
     ]
+
+
+def download_lesson(video_id: str, target: str, on_progress) -> tuple[int, str]:
+    proc = subprocess.Popen(ytdlp_command(video_id, target), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    lines: list[str] = []
+    last = 0.0
+    if proc.stdout:
+        for line in proc.stdout:
+            lines.append(line)
+            parsed = parse_progress(line)
+            now = time.time()
+            if parsed and now - last >= 2:
+                last = now
+                on_progress(*parsed)
+    return proc.wait(), "".join(lines)
 
 
 def probe_media(path: str) -> dict:
@@ -210,6 +253,7 @@ def upload_via_worker(worker: str, secret: str, video_id: str, path: str, size: 
                 break
             etag = put_part(base, secret, video_id, upload_id, number, chunk, handle.tell() >= size)
             parts.append({"partNumber": number, "etag": etag})
+            report_progress(worker, secret, video_id, "upload", min(handle.tell(), size), size)
             number += 1
     return post(
         base + "/full/upload/complete",
@@ -230,9 +274,12 @@ def run_once(worker: str, secret: str) -> int:
         return 1
     with tempfile.TemporaryDirectory(prefix="full-cache-") as tmp:
         target = os.path.join(tmp, f"{video_id}.mp4")
-        proc = subprocess.run(ytdlp_command(video_id, target), capture_output=True, text=True)
-        text = (proc.stdout or "") + "\n" + (proc.stderr or "")
-        kind = classify_ytdlp(proc.returncode, text)
+        code, text = download_lesson(
+            video_id,
+            target,
+            lambda received, total: report_progress(worker, secret, video_id, "download", received, total),
+        )
+        kind = classify_ytdlp(code, text)
         if kind != "downloaded" or not os.path.isfile(target) or target.endswith(".part"):
             error = "youtube-refused" if kind == "refused" else failure_code(text)
             post(worker.rstrip("/") + "/full/result", secret, {"v": video_id, "outcome": "refused" if kind == "refused" else "failed", "error": error})
