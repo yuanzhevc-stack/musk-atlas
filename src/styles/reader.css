@@ -2290,20 +2290,20 @@ body.is-study .main { padding: 0; margin: 0; max-width: none; }
   min-height: 0;
   overflow: auto;
   scroll-behavior: smooth;
-  padding: 4px 2px 12px;
+  container-type: size;
+  padding: 0 2px;
   border: 0;
   background: transparent;
   -webkit-mask-image: none;
   mask-image: none;
 }
-.desk .vs-subs .desk-row,
-.desk .vs-subs .desk-row.is-current {
-  opacity: 1;
-}
+.desk .lyric-pad { height: 50cqh; pointer-events: none; }
+.desk .vs-subs .desk-row { opacity: 0.38; transition: opacity 0.2s ease; }
+.desk .vs-subs .desk-row.is-current { opacity: 1; }
 .desk .vs-subs .desk-row.is-current .vs-line.rd-text {
   font-size: 17px;
-  font-weight: 400;
-  color: #2c3138;
+  font-weight: 600;
+  color: #16181d;
 }
 .desk-frame { border-radius: 12px; overflow: hidden; background: #111; }
 .desk-progress {

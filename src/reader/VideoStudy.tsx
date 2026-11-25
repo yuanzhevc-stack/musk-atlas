@@ -12,7 +12,7 @@ import { DESK_MODES, MODE_LABEL, clipReached, dragPhrase, keptCaption, loopDecis
 import { LessonPractice } from "./LessonPractice";
 import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAudio";
 import { readNote, writeNote } from "./lessonNotes";
-import { followAllowed, lessonMedia, lyricScroll, sentenceAt, sentenceSpan, shouldRecenter } from "./sync";
+import { centerScroll, followAllowed, lessonMedia, sentenceAt, sentenceSpan, shouldRecenter } from "./sync";
 import { YoutubePlayer, type PlayerHandle, type PlayerPhase } from "./YoutubePlayer";
 import { captionsToLesson, clockOf, fetchCaptions, sentenceCase, watchUrl } from "./youtube";
 import { toast } from "../ui/Toast";
@@ -468,7 +468,7 @@ export function VideoStudy({
     if (!list || !row || list.clientHeight < 40) return;
     if (mode === "follow" && !followAllowed({ picking: picking.current, cardOpen: selRef.current != null, userHold: heldRef.current })) return;
     const itemTop = list.scrollTop + (row.getBoundingClientRect().top - list.getBoundingClientRect().top);
-    const next = lyricScroll(list.clientHeight, list.scrollHeight, itemTop, row.offsetHeight);
+    const next = centerScroll(list.clientHeight, list.scrollHeight, itemTop, row.offsetHeight);
     if (mode === "follow" && !shouldRecenter(list.scrollTop, next)) return;
     lastSet.current = next;
     ignoreScrollUntil.current = performance.now() + 720;
@@ -492,10 +492,7 @@ export function VideoStudy({
       cancelAnimationFrame(id);
     };
   }, [cur, held, sel]); // eslint-disable-line react-hooks/exhaustive-deps
-  const onListScroll = () => {
-    const list = listRef.current;
-    if (!list || programmatic.current || performance.now() < ignoreScrollUntil.current) return;
-    if (Math.abs(list.scrollTop - lastSet.current) < 48) return;
+  const holdList = () => {
     heldRef.current = true;
     setHeld(true);
     window.clearTimeout(holdTimer.current);
@@ -862,10 +859,12 @@ export function VideoStudy({
         <Search size={14} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索英文字幕" aria-label="搜索字幕" data-testid="transcript-search" />
       </label>
-      <div className="vs-subs" ref={listRef} role="list" aria-label="字幕" data-testid="vs-subs" onScroll={onListScroll}>
+      <div className="vs-subs" ref={listRef} role="list" aria-label="字幕" data-testid="vs-subs" onWheel={holdList} onTouchMove={holdList} onPointerDown={holdList}>
         {held && <button type="button" className="vs-return" onClick={backToCurrent} data-testid="vs-return">回到当前句</button>}
+        <div className="lyric-pad" aria-hidden="true" />
         {visible.map((line) => row(line, true))}
         {!visible.length && <p className="desk-empty">没有符合搜索的句子。</p>}
+        <div className="lyric-pad" aria-hidden="true" />
       </div>
       </div>
       </div>
