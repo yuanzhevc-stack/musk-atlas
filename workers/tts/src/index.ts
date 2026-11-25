@@ -94,7 +94,10 @@ async function sha256(s: string) {
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname === "/full/capability" || url.pathname === "/full/claim" || url.pathname === "/full/result" || url.pathname.startsWith("/full/upload/")) {
+    if (url.pathname === "/full/capability" || url.pathname === "/full/claim" || url.pathname === "/full/result" || url.pathname === "/full/progress" || url.pathname.startsWith("/full/upload/")) {
+      if (url.pathname === "/full/claim" && req.headers.get("X-Cache-Script") !== "2") {
+        return new Response(JSON.stringify({ job: null }), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+      }
       return handleFullCache(req, asJobBucket(env.BUCKET), {}, { secret: env.CACHE_JOB_SECRET ?? "", now: Date.now() });
     }
     const origin = req.headers.get("Origin") ?? "";

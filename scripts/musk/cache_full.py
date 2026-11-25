@@ -41,6 +41,7 @@ MIN_SECONDS = 20
 # https://developers.cloudflare.com/workers/configuration/routing/workers-dev/
 APP_USER_AGENT = "musk-atlas-cache/1.0 (+https://yuanzhevc-stack.github.io/musk-atlas/)"
 WORKER_HOST = "musk-atlas-tts.yuanzhevc.workers.dev"
+SCRIPT_BUILD = "2"
 REFUSED_MARKS = ("sign in to confirm", "not a bot", "login required", "confirm you’re not a bot", "confirm you're not a bot")
 
 
@@ -155,6 +156,8 @@ def ytdlp_command(video_id: str, target: str) -> list[str]:
         "-o",
         target,
         "--newline",
+        "--js-runtimes",
+        "deno",
         f"https://www.youtube.com/watch?v={video_id}",
     ]
 
@@ -208,6 +211,7 @@ def worker_request(url: str, secret: str, method: str, data: bytes | None, conte
     headers = {
         "User-Agent": APP_USER_AGENT,
         "Authorization": f"Bearer {secret}",
+        "X-Cache-Script": SCRIPT_BUILD,
     }
     if content_type:
         headers["Content-Type"] = content_type
@@ -267,7 +271,7 @@ def run_once(worker: str, secret: str) -> int:
     job = claimed.get("job")
     if not job:
         print("no queued full-video job")
-        return 0
+        return 5
     video_id = str(job.get("v") or "")
     if len(video_id) != 11 or "/" in video_id or "." in video_id:
         print("refusing a job that is not a youtube id")
@@ -315,6 +319,11 @@ def run_once(worker: str, secret: str) -> int:
         return 0
 
 
+def loop_delay(code: int) -> int:
+    """A finished video waits a minute. An empty queue, a failure, or a dropped connection waits 30 seconds."""
+    return 60 if code == 0 else 30
+
+
 def main() -> int:
     worker = os.environ.get("CACHE_WORKER_URL", "")
     secret = os.environ.get("CACHE_JOB_SECRET", "")
@@ -346,13 +355,23 @@ def main() -> int:
     if missing:
         print(f"{missing}: not claiming. Install the pinned tool in this Python environment before --manual.", file=sys.stderr)
         return 1
-    if not require_manual_worker(worker, secret):
-        return 3
     while True:
-        code = run_once(worker, secret)
+        try:
+            if not require_manual_worker(worker, secret):
+                if mode != "manual-loop":
+                    return 3
+                time.sleep(loop_delay(3))
+                continue
+            code = run_once(worker, secret)
+        except Exception as exc:
+            print(f"claim loop error, staying up: {exc}", file=sys.stderr)
+            if mode != "manual-loop":
+                return 1
+            time.sleep(loop_delay(1))
+            continue
         if mode != "manual-loop":
             return code
-        time.sleep(60 if code == 0 else 30)
+        time.sleep(loop_delay(code))
 
 
 if __name__ == "__main__":

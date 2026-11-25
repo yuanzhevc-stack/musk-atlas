@@ -8,7 +8,7 @@ from unittest import mock
 
 import cache_full
 import seed_full
-from cache_full import APP_USER_AGENT, MANUAL_FORMAT, WORKER_HOST, classify_ytdlp, dependency_problem, failure_code, parse_progress, post, put_part, run_mode, upload_via_worker, worker_is_manual_720, worker_request, ytdlp_command
+from cache_full import APP_USER_AGENT, MANUAL_FORMAT, SCRIPT_BUILD, WORKER_HOST, classify_ytdlp, dependency_problem, failure_code, loop_delay, parse_progress, post, put_part, run_mode, upload_via_worker, worker_is_manual_720, worker_request, ytdlp_command
 
 SECRET = "unit-secret-not-real"
 BASE = f"https://{WORKER_HOST}"
@@ -53,6 +53,7 @@ class WorkerClient(unittest.TestCase):
         self.assertNotIn("Safari", APP_USER_AGENT)
         self.assertNotIn("Chrome", APP_USER_AGENT)
         self.assertEqual(req.get_header("Authorization"), f"Bearer {SECRET}")
+        self.assertEqual(req.get_header("X-cache-script"), SCRIPT_BUILD)
         self.assertEqual(urllib_host(req.full_url), WORKER_HOST)
 
     def test_upload_claim_and_result_identify_this_app(self):
@@ -102,6 +103,8 @@ class WorkerClient(unittest.TestCase):
         self.assertIn("res:720,fps:30,vcodec:h264,acodec:aac,ext:mp4", command)
         self.assertIn("Merger+ffmpeg:-c copy -movflags +faststart", command)
         self.assertIn("--newline", command)
+        self.assertIn("--js-runtimes", command)
+        self.assertIn("deno", command)
         self.assertNotIn("--cookies", command)
         self.assertNotIn("--proxy", command)
         self.assertNotIn("--user-agent", command)
@@ -109,6 +112,11 @@ class WorkerClient(unittest.TestCase):
         self.assertNotIn("Mozilla", joined)
         self.assertNotIn(APP_USER_AGENT, joined)
         self.assertIn("https://www.youtube.com/watch?v=s9mczdODqzo", command)
+
+    def test_idle_queue_waits_half_a_minute(self):
+        self.assertEqual(loop_delay(0), 60)
+        self.assertEqual(loop_delay(5), 30)
+        self.assertEqual(loop_delay(1), 30)
 
     def test_old_worker_handshake_is_closed(self):
         self.assertTrue(worker_is_manual_720({"scope": "manual-only", "maxHeight": 720, "policy": "lte-720", "preferFps": 30}))
