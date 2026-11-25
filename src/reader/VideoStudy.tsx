@@ -461,19 +461,21 @@ export function VideoStudy({
     };
   }, [ipaOn, cur, lines]);
 
+  const bodyRef = useRef<HTMLDivElement>(null);
   const alignTo = (sid: number, mode: "force" | "follow") => {
     const list = listRef.current;
     const mark = list?.querySelector<HTMLElement>(`[data-vs="${sid}"]`);
     const row = mark?.closest<HTMLElement>(".desk-row") ?? mark;
-    if (!list || !row || list.clientHeight < 40) return;
+    const line = row?.querySelector<HTMLElement>(".vs-line") ?? row;
+    if (!list || !line || list.clientHeight < 40) return;
     if (mode === "follow" && !followAllowed({ picking: picking.current, cardOpen: selRef.current != null, userHold: heldRef.current })) return;
-    const itemTop = list.scrollTop + (row.getBoundingClientRect().top - list.getBoundingClientRect().top);
-    const next = centerScroll(list.clientHeight, list.scrollHeight, itemTop, row.offsetHeight);
+    const itemTop = list.scrollTop + (line.getBoundingClientRect().top - list.getBoundingClientRect().top);
+    const next = centerScroll(list.clientHeight, list.scrollHeight, itemTop, line.offsetHeight);
     if (mode === "follow" && !shouldRecenter(list.scrollTop, next)) return;
     lastSet.current = next;
     ignoreScrollUntil.current = performance.now() + 720;
     programmatic.current = true;
-    list.scrollTo({ top: next, behavior: "smooth" });
+    list.scrollTo({ top: next, behavior: mode === "force" ? "smooth" : "auto" });
     window.setTimeout(() => {
       programmatic.current = false;
     }, 720);
@@ -492,6 +494,16 @@ export function VideoStudy({
       cancelAnimationFrame(id);
     };
   }, [cur, held, sel]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || typeof ResizeObserver === "undefined") return;
+    const obs = new ResizeObserver(() => {
+      if (heldRef.current) return;
+      alignTo(curRef.current, "follow");
+    });
+    obs.observe(body);
+    return () => obs.disconnect();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const holdList = () => {
     heldRef.current = true;
     setHeld(true);
@@ -861,10 +873,12 @@ export function VideoStudy({
       </label>
       <div className="vs-subs" ref={listRef} role="list" aria-label="字幕" data-testid="vs-subs" onWheel={holdList} onTouchMove={holdList} onPointerDown={holdList}>
         {held && <button type="button" className="vs-return" onClick={backToCurrent} data-testid="vs-return">回到当前句</button>}
+        <div ref={bodyRef}>
         <div className="lyric-pad" aria-hidden="true" />
         {visible.map((line) => row(line, true))}
         {!visible.length && <p className="desk-empty">没有符合搜索的句子。</p>}
         <div className="lyric-pad" aria-hidden="true" />
+        </div>
       </div>
       </div>
       </div>
