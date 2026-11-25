@@ -60,6 +60,19 @@ test("caption fragments join into a sentence and a new but-clause starts another
   assert.equal(lines[1].ms, 65000);
 });
 
+test("a caption that stops mid-phrase is finished by the next cue", async () => {
+  const { speechLines } = await import("./youtube.ts");
+  const lines = speechLines([
+    [0, 8000, "How do you go from this to this without having to study interior design"],
+    [8000, 8000, "or break the bank? Making a space look good is a skill, but like most skills in life, it often doesn't come naturally at first. For the past few months, I've"],
+    [16000, 9000, "been stuck at home a lot more due to some medical issues."],
+  ]);
+  assert.equal(lines[0].text, "How do you go from this to this without having to study interior design or break the bank?");
+  assert.equal(lines[1].text, "Making a space look good is a skill, but like most skills in life, it often doesn't come naturally at first.");
+  assert.equal(lines[1].text.endsWith("come"), false);
+  assert.equal(lines[2].text, "For the past few months, I've been stuck at home a lot more due to some medical issues.");
+});
+
 test("all-caps captions become sentence case and normal captions stay", async () => {
   const { sentenceCase } = await import("./youtube.ts");
   assert.equal(sentenceCase("SO MANY AREAS OF CONVERGENCE."), "So many areas of convergence.");

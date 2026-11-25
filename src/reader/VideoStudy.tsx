@@ -1,5 +1,5 @@
 /** Video-first study: player and the lesson's own captions. Word taps reuse the reader card. */
-import { BookMarked, BookOpen, Clock, Compass, Copy, Eye, EyeOff, Heart, Maximize, Mic, MoreHorizontal, Pause, Pencil, Play, Repeat, RotateCcw, Search, SkipBack, SkipForward } from "lucide-react";
+import { BookMarked, BookOpen, Clock, Compass, Copy, Eye, EyeOff, Heart, Maximize, MoreHorizontal, Pause, Pencil, Play, Repeat, RotateCcw, Search, SkipBack, SkipForward } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { Item, Lesson, Token } from "./model";
@@ -10,7 +10,6 @@ import { saveChoice, type SourceChoice } from "./hostedLesson";
 import { adoptReady, cacheStatusLine, downloadPercent, enqueueFullCache, forgetReady, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
 import { DESK_MODES, MODE_LABEL, clipReached, dragPhrase, keptCaption, loopDecision, loopRange, nextSpeed, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, showsChinese, type DeskMode, type RowDisclosure } from "./lessonDesk";
 import { LessonPractice } from "./LessonPractice";
-import { loadClip, recordingError, recorderSupport, saveClip } from "./lessonAudio";
 import { readNote, writeNote } from "./lessonNotes";
 import { centerScroll, followAllowed, lessonMedia, sentenceAt, sentenceSpan, shouldRecenter } from "./sync";
 import { YoutubePlayer, type PlayerHandle, type PlayerPhase } from "./YoutubePlayer";
@@ -195,8 +194,6 @@ export function VideoStudy({
   const [revealed, setRevealed] = useState(false);
   const [noteFor, setNoteFor] = useState<number | null>(null);
   const [noteText, setNoteText] = useState("");
-  const [recNote, setRecNote] = useState("");
-  const [clips, setClips] = useState<Record<number, string>>({});
   const [ipaOn, setIpaOn] = useState(false);
   const [ipaLine, setIpaLine] = useState("");
   const loopHold = useRef<{ at: number } | null>(null);
@@ -526,17 +523,23 @@ export function VideoStudy({
     let live = true;
     const v = yt.v;
     const cased = lesson.text.split("\n").map((line) => sentenceCase(line)).join("\n");
-    if (cased !== lesson.text) reader.updateLesson(lesson.id, { text: cased });
+    if (cased !== lesson.text) reader.updateLesson(lesson.id, { text: cased, opened: Date.now() });
     void fetchCaptions(v)
       .then((c) => {
         if (!live) return;
         const next = captionsToLesson(c);
         if (!next.text.trim() || !next.times.length) return;
-        const sameText = next.text === lesson.text;
-        const sameTimes = next.times.length === yt.times.length && next.times.every((t, i) => t === yt.times[i]);
+        const current = reader.get().lessons.find((item) => item.id === lesson.id);
+        if (!current?.yt) return;
+        const sameText = next.text === current.text;
+        const sameTimes = next.times.length === current.yt.times.length && next.times.every((t, i) => t === current.yt?.times[i]);
         if (sameText && sameTimes) return;
         const at = clock.current > 0.2 ? clock.current : (timesRef.current[curRef.current] ?? 0);
-        reader.updateLesson(lesson.id, { text: next.text, yt: { ...yt, times: next.times, kind: c.kind, author: c.author ?? yt.author } });
+        reader.updateLesson(lesson.id, {
+          text: next.text,
+          opened: Date.now(),
+          yt: { ...current.yt, times: next.times, kind: c.kind, author: c.author ?? current.yt.author },
+        });
         setTr({});
         setCur(sentenceAt(next.times, at));
       })
@@ -546,7 +549,7 @@ export function VideoStudy({
     return () => {
       live = false;
     };
-  }, [lesson.id, yt.v]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lesson.id, yt.v, lesson.text]); // eslint-disable-line react-hooks/exhaustive-deps
   const onTime = (t: number) => {
     clock.current = t;
     setMediaClock((prev) => (Math.abs(prev - t) < 0.35 ? prev : t));
@@ -645,15 +648,6 @@ export function VideoStudy({
   useEffect(() => {
     if (source === "local" && phase === "error") forgetReady(yt.v);
   }, [source, phase, yt.v]);
-  useEffect(() => {
-    let live = true;
-    void loadClip(lesson.id, cur).then((url) => {
-      if (live && url) setClips((prev) => (prev[cur] ? prev : { ...prev, [cur]: url }));
-    });
-    return () => {
-      live = false;
-    };
-  }, [lesson.id, cur]);
 
   const at = times[cur];
   const last = Math.max(0, doc.sentences.length - 1);
@@ -663,17 +657,33 @@ export function VideoStudy({
   const practice = mode === "dictation" || mode === "cloze" || mode === "zh2en" || mode === "cards";
   const showZh = showsChinese(mode);
   const stageRef = useRef<HTMLDivElement>(null);
-  const recorder = useRef<MediaRecorder | null>(null);
   const copySentence = (text: string) => {
     const done = () => toast("已复制这一句", "ok");
-    if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).then(done, () => toast("没有复制成功", "warn"));
-    else toast("这台浏览器不能复制", "warn");
+    const fallback = () => {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "true");
+      area.style.position = "fixed";
+      area.style.left = "-9999px";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      if (ok) done();
+      else toast("没有复制成功", "warn");
+    };
+    if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).then(done, fallback);
+    else fallback();
   };
   const favoriteSentence = (sid: number, text: string) => {
     const saved = reader.toggleSentence(text, { lesson: lesson.id, title: lesson.title, sid, sentence: text, media: lessonMedia(lesson.yt, sid) });
     toast(saved ? "已收藏到语料库" : "已取消收藏", "ok");
   };
   const openNote = (sid: number, text: string) => {
+    if (noteFor === sid) {
+      setNoteFor(null);
+      return;
+    }
     setNoteFor(sid);
     setNoteText(readNote(lesson.id, sid) || items[normalize(text)]?.notes || "");
   };
@@ -684,42 +694,23 @@ export function VideoStudy({
     if (items[normalize(text)]?.kind === "sentence") reader.upsert(text, { notes: noteText.trim() });
     toast("笔记已留在这台设备", "ok");
   };
-  const recordSentence = async (sid: number) => {
-    if (recorder.current) {
-      recorder.current.stop();
-      return;
-    }
-    if (recorderSupport() !== "ready") {
-      setRecNote("这台浏览器不能录音。");
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
-      const chunks: Blob[] = [];
-      rec.ondataavailable = (event) => {
-        if (event.data.size) chunks.push(event.data);
-      };
-      rec.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        recorder.current = null;
-        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
-        void saveClip(lesson.id, sid, blob).then((url) => setClips((prev) => ({ ...prev, [sid]: url })));
-        setRecNote("录音只保存在这台设备，没有上传。");
-      };
-      recorder.current = rec;
-      rec.start();
-      setRecNote("正在录音。再点一次麦克风结束。");
-    } catch (error) {
-      setRecNote(recordingError(error) === "denied" ? "没有获得麦克风权限，录音没有开始。" : "这台浏览器不能在这里录音。");
-    }
-  };
   const row = (line: (typeof lines)[number], inTranscript: boolean) => {
     const hit = !!sel && line.tokens.length > 0 && sel.to >= line.tokens[0].i && sel.from <= line.tokens[line.tokens.length - 1].i;
     const disclosure = rowDisclosure(mode, revealed, line.sid === cur, inTranscript);
+    const saved = items[normalize(line.text)]?.kind === "sentence";
+    const span = sentenceSpan(times, line.sid);
+    const timeLabel = span ? `${clockOf(span.t)} - ${clockOf(span.e)}` : "–";
     return (
-      <div key={line.sid} className={`desk-row${inTranscript && line.sid === cur ? " is-current" : ""}`}>
-        {inTranscript && <span className="desk-num">{line.sid + 1}</span>}
+      <div
+        key={line.sid}
+        className={`desk-row${inTranscript && line.sid === cur ? " is-current" : ""}`}
+        onClick={(e) => {
+          if (!inTranscript) return;
+          const target = e.target as HTMLElement;
+          if (target.closest("button, textarea, a, .w, .desk-note-form")) return;
+          jump(line.sid);
+        }}
+      >
         <SentRow
           sid={line.sid}
           tokens={line.tokens}
@@ -727,10 +718,7 @@ export function VideoStudy({
           selFrom={hit && sel ? sel.from : -1}
           selTo={hit && sel ? sel.to : -1}
           stamp={stampOf(line.tokens, items, phraseAt)}
-          timeLabel={(() => {
-            const span = sentenceSpan(times, line.sid);
-            return span ? `${clockOf(span.t)} - ${clockOf(span.e)}` : "–";
-          })()}
+          timeLabel={timeLabel}
           showTr={showZh && disclosure !== "answer-hidden"}
           tr={disclosure === "answer-hidden" ? "" : (tr[line.sid] ?? (showZh ? "正在取译文…" : ""))}
           disclosure={disclosure}
@@ -739,14 +727,23 @@ export function VideoStudy({
           bus={bus}
         />
         {inTranscript && (
-          <div className="desk-row-actions">
-            <button type="button" aria-label="复制这一句" onClick={() => copySentence(line.text)}><Copy size={14} /></button>
-            <button type="button" aria-label="收藏这一句" onClick={() => favoriteSentence(line.sid, line.text)}><Heart size={16} /></button>
-            <button type="button" aria-label="给这一句写笔记" onClick={() => openNote(line.sid, line.text)}><Pencil size={16} /></button>
-            <button type="button" aria-label="录下自己的声音" onClick={() => void recordSentence(line.sid)}><Mic size={14} /></button>
-            <button type="button" aria-label="播放这一句" onClick={() => jump(line.sid)}><Play size={14} /></button>
-            {clips[line.sid] && <audio src={clips[line.sid]} controls preload="none" data-testid="sentence-audio" />}
+          <div className="desk-row-foot">
+            <span className="desk-num">{line.sid + 1}</span>
+            <span className="desk-time">{timeLabel}</span>
+            <div className="desk-row-actions" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+              <button type="button" aria-label="复制这一句" data-testid="sentence-copy" onClick={() => copySentence(line.text)}><Copy size={15} /></button>
+              <button type="button" className={saved ? "is-on" : ""} aria-pressed={saved} aria-label={saved ? "取消收藏这一句" : "收藏这一句"} data-testid="sentence-save" onClick={() => favoriteSentence(line.sid, line.text)}><Heart size={15} fill={saved ? "currentColor" : "none"} /></button>
+              <button type="button" className={noteFor === line.sid ? "is-note" : ""} aria-pressed={noteFor === line.sid} aria-label="给这一句写笔记" data-testid="sentence-note-open" onClick={() => openNote(line.sid, line.text)}><Pencil size={15} /></button>
+            </div>
           </div>
+        )}
+        {inTranscript && noteFor === line.sid && (
+          <form className="desk-note-form" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); saveOpenNote(); }}>
+            <label>这一句的笔记
+              <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={3} data-testid="sentence-note" />
+            </label>
+            <button type="submit">保存笔记</button>
+          </form>
         )}
       </div>
     );
@@ -844,15 +841,6 @@ export function VideoStudy({
           />
         )}
         {ipaOn && <p className="desk-ipa" data-testid="desk-ipa-line">{ipaLine || "词典里没有这一句的音标。"}</p>}
-        {recNote && <p className="desk-note" data-testid="rec-note">{recNote}</p>}
-        {noteFor != null && (
-          <form className="desk-note-form" onSubmit={(e) => { e.preventDefault(); saveOpenNote(); }}>
-            <label>第 {noteFor + 1} 句的笔记
-              <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={3} data-testid="sentence-note" />
-            </label>
-            <button type="submit">保存笔记</button>
-          </form>
-        )}
         {hint && <p className="vs-hint" data-testid="vs-hint">{hint}</p>}
         <details className="desk-details">
           <summary>来源</summary>
