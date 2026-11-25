@@ -28,3 +28,25 @@ test("a second device keeps both lessons and the newer sentence", () => {
   const cards = (merged.progress as { cards: Record<string, unknown> }).cards;
   assert.equal("w1" in cards && "w2" in cards, true);
 });
+
+test("a deleted lesson stays deleted when the other device still has it", () => {
+  const server: CloudLibrary = {
+    rev: 4,
+    lessons: [
+      { id: "keep", title: "Keep", text: "stay", created: 1 },
+      { id: "drop", title: "Drop", text: "go", created: 2, opened: 9 },
+    ],
+    items: {},
+    notes: {},
+    progress: null,
+  };
+  const local = {
+    lessons: [{ id: "keep", title: "Keep", text: "stay", created: 1 }],
+    items: {},
+    notes: { __gone: "drop" },
+    progress: null,
+  };
+  const merged = mergeCloud(server, local);
+  assert.deepEqual(merged.lessons.map((lesson) => lesson.id), ["keep"]);
+  assert.equal(merged.notes.__gone, "drop");
+});

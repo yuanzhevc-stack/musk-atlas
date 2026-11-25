@@ -2,6 +2,7 @@
 import { useSyncExternalStore } from "react";
 import { flush, onProgressCommit, replaceProgress, store } from "../store/store";
 import { allNotes, onNotesCommit, replaceNotes } from "./lessonNotes";
+import { goneSet, withGone } from "./gone";
 import { onLibraryCommit, reader, replaceLibrary, type Item, type Lesson } from "./model";
 
 const TTS_URL = "https://musk-atlas-tts.yuanzhevc.workers.dev";
@@ -98,10 +99,11 @@ function mergeProgress(server: unknown, local: unknown): unknown {
 }
 
 export function mergeCloud(server: CloudLibrary, local: Omit<CloudLibrary, "rev" | "savedAt">): Omit<CloudLibrary, "rev" | "savedAt"> {
+  const gone = new Set([...goneSet(server.notes), ...goneSet(local.notes)]);
   const lessons = new Map<string, Lesson>();
-  for (const lesson of server.lessons ?? []) if (lesson?.id) lessons.set(lesson.id, lesson);
+  for (const lesson of server.lessons ?? []) if (lesson?.id && !gone.has(lesson.id)) lessons.set(lesson.id, lesson);
   for (const lesson of local.lessons ?? []) {
-    if (!lesson?.id) continue;
+    if (!lesson?.id || gone.has(lesson.id)) continue;
     const prev = lessons.get(lesson.id);
     if (!prev || (lesson.opened ?? lesson.created ?? 0) >= (prev.opened ?? prev.created ?? 0)) lessons.set(lesson.id, lesson);
   }
@@ -110,10 +112,12 @@ export function mergeCloud(server: CloudLibrary, local: Omit<CloudLibrary, "rev"
     const prev = items[key];
     if (!prev || (item?.updated ?? 0) >= (prev.updated ?? 0)) items[key] = item;
   }
+  const notes = { ...(server.notes ?? {}), ...(local.notes ?? {}) };
+  delete notes.__gone;
   return {
     lessons: [...lessons.values()],
     items,
-    notes: { ...(server.notes ?? {}), ...(local.notes ?? {}) },
+    notes: withGone(notes, gone),
     progress: mergeProgress(server.progress, local.progress),
   };
 }

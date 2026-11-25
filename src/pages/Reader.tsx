@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpen, Bookmark, Youtube, X as Close, Check, ChevronLeft, Languages, ChevronRight, ExternalLink, Pause, Play, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Bookmark, Youtube, X as Close, Check, ChevronLeft, Columns3, Languages, ChevronRight, ExternalLink, LayoutGrid, Pause, Play, Plus, Search, SlidersHorizontal, Table2, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { go } from "../lib/router";
@@ -8,7 +8,9 @@ import { prefetch, RATES, tts, useTts } from "../reader/tts";
 import { StatusPicker, WordCard, type Sel } from "../reader/WordCard";
 export { StatusPicker };
 import { useAccount } from "../reader/cloud";
-import { lessonStats, normalize, parse, phraseIndex, reader, useReader, type Context, type Item, type Lesson, type Status, type Token } from "../reader/model";
+import { forgetLesson } from "../reader/gone";
+import { DESK_VIEWS, KIND_FILTERS, KIND_LABEL, LANES, LANE_LABEL, LESSON_SORTS, SORT_LABEL, VIEW_LABEL, deskRows, type DeskView, type KindFilter, type Lane, type LessonRow, type LessonSort } from "../reader/libraryViews";
+import { normalize, parse, phraseIndex, reader, useReader, type Context, type Item, type Lesson, type Status, type Token } from "../reader/model";
 import { lessonMedia } from "../reader/sync";
 import { VideoStudy } from "../reader/VideoStudy";
 import { gsel } from "../reader/select";
@@ -35,65 +37,247 @@ export function ReaderPage({ l, s }: { l?: string; s?: string }) {
 
 /* ---------- library ---------- */
 
+const DESK_KEY = "musk-atlas:reader:desk";
+
+function readDesk() {
+  const fallback = { view: "gallery" as DeskView, kind: "all" as KindFilter, lane: "all" as Lane | "all", sort: "opened" as LessonSort };
+  try {
+    const raw = JSON.parse(localStorage.getItem(DESK_KEY) || "{}") as Partial<typeof fallback>;
+    return {
+      view: DESK_VIEWS.includes(raw.view as DeskView) ? (raw.view as DeskView) : fallback.view,
+      kind: KIND_FILTERS.includes(raw.kind as KindFilter) ? (raw.kind as KindFilter) : fallback.kind,
+      lane: raw.lane === "all" || LANES.includes(raw.lane as Lane) ? (raw.lane as Lane | "all") : fallback.lane,
+      sort: LESSON_SORTS.includes(raw.sort as LessonSort) ? (raw.sort as LessonSort) : fallback.sort,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function openedLabel(ts: number) {
+  if (!ts) return "—";
+  const date = new Date(ts);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return `${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
 function Library({ missing }: { missing: boolean }) {
   const st = useReader();
   const account = useAccount();
+  const saved = useMemo(readDesk, []);
   const [importing, setImporting] = useState(false);
+  const [view, setView] = useState<DeskView>(saved.view);
+  const [kind, setKind] = useState<KindFilter>(saved.kind);
+  const [lane, setLane] = useState<Lane | "all">(saved.lane);
+  const [sort, setSort] = useState<LessonSort>(saved.sort);
+  const [q, setQ] = useState("");
+  const [menu, setMenu] = useState<"filter" | "sort" | null>(null);
+  const [armed, setArmed] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      localStorage.setItem(DESK_KEY, JSON.stringify({ view, kind, lane, sort }));
+    } catch {
+      /* a private window can refuse the write; the choice still applies now */
+    }
+  }, [view, kind, lane, sort]);
+  const rows = useMemo(() => deskRows(st.lessons, st.items, { q, kind, lane, sort }), [st.lessons, st.items, q, kind, lane, sort]);
+  const filtering = !!q.trim() || kind !== "all" || lane !== "all";
+  const drop = (id: string) => {
+    if (armed !== id) {
+      setArmed(id);
+      return;
+    }
+    forgetLesson(id);
+    setArmed(null);
+  };
+  const trySample = () => {
+    const ls = reader.addLesson(SAMPLE);
+    go({ page: "reader", l: ls.id });
+  };
   return (
-    <div className="page rd-page">
+    <div className="page rd-page" onClick={() => { setMenu(null); setArmed(null); }}>
       <header className="rd-head">
         <div>
           <p className="rd-eyebrow">阅读</p>
           <h1 className="rd-title">课程</h1>
         </div>
+        <p className="rd-dim rd-head-meta">{filtering ? `${rows.length} / ${st.lessons.length}` : st.lessons.length} 节</p>
       </header>
       {missing && <p className="rd-dim">这节课不在这个账号里。</p>}
       {!account.session && <p className="rd-dim">还没登录。这些课只在这台浏览器，到「我的」登录后才会跟着账号走。</p>}
       {account.session && account.status === "error" && <p className="rd-dim">{account.detail}</p>}
-      <div className="rd-lib">
-        <button className="rd-card rd-card-new" onClick={() => setImporting(true)} data-testid="import-open">
-          <Plus size={22} />
-          <b>导入课程</b>
-          <span>粘贴一段英文</span>
-        </button>
-        {st.lessons.map((ls) => {
-          const k = lessonStats(ls.text, st.items);
-          const known = k.unique ? Math.round(((k.unique - k.blue - k.learning) / k.unique) * 100) : 0;
-          return (
-            <a key={ls.id} href={`#/reader?l=${ls.id}`} className="rd-card" data-testid="lesson-card">
-              <b>{ls.title}</b>
-              <span className="rd-card-meta">
-                {ls.yt ? "视频 · " : ""}
-                {k.unique} 词 · <i className="dot dot-blue" />
-                {k.blue} · <i className="dot dot-yellow" />
-                {k.learning}
-              </span>
-              <span className="rd-bar">
-                <span style={{ width: `${known}%` }} />
-              </span>
-              <span className="rd-card-foot">
-                {known}% 已知
-                {ls.url && <ExternalLink size={12} />}
-              </span>
-            </a>
-          );
-        })}
-        {!st.lessons.length && (
-          <button
-            className="rd-card rd-card-ghost"
-            onClick={() => {
-              const ls = reader.addLesson(SAMPLE);
-              go({ page: "reader", l: ls.id });
-            }}
-          >
-            <BookOpen size={20} />
-            <b>试试示例</b>
-            <span>一段关于第一性原理的短文</span>
+
+      <div className="rd-deskbar" onClick={(e) => e.stopPropagation()}>
+        <label className="rd-search">
+          <Search size={16} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索标题或作者" data-testid="lesson-search" />
+          {q && (
+            <button className="rd-icon" type="button" onClick={() => setQ("")} aria-label="清空搜索">
+              <Close size={15} />
+            </button>
+          )}
+        </label>
+        <div className="rd-tabs" role="tablist" aria-label="视图">
+          {([
+            ["gallery", LayoutGrid],
+            ["table", Table2],
+            ["board", Columns3],
+          ] as const).map(([id, Icon]) => (
+            <button key={id} type="button" role="tab" aria-selected={view === id} className={view === id ? "is-on" : ""} onClick={() => setView(id)} data-testid={`view-${id}`}>
+              <Icon size={14} /> {VIEW_LABEL[id]}
+            </button>
+          ))}
+        </div>
+        <div className="rd-menu">
+          <button type="button" className={`rd-btn ${filtering ? "is-on" : ""}`} aria-expanded={menu === "filter"} onClick={() => setMenu(menu === "filter" ? null : "filter")} data-testid="lesson-filter">
+            <SlidersHorizontal size={15} /> 筛选
           </button>
-        )}
+          {menu === "filter" && (
+            <div className="rd-popover" role="dialog" aria-label="筛选">
+              <p>类型</p>
+              <div>
+                {KIND_FILTERS.map((id) => (
+                  <button key={id} type="button" className={kind === id ? "is-on" : ""} onClick={() => setKind(id)}>{KIND_LABEL[id]}</button>
+                ))}
+              </div>
+              <p>进度</p>
+              <div>
+                <button type="button" className={lane === "all" ? "is-on" : ""} onClick={() => setLane("all")}>全部</button>
+                {LANES.map((id) => (
+                  <button key={id} type="button" className={lane === id ? "is-on" : ""} onClick={() => setLane(id)}>{LANE_LABEL[id]}</button>
+                ))}
+              </div>
+              {filtering && (
+                <button type="button" className="rd-link" onClick={() => { setKind("all"); setLane("all"); setQ(""); }}>清除筛选</button>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="rd-menu">
+          <button type="button" className="rd-btn" aria-expanded={menu === "sort"} onClick={() => setMenu(menu === "sort" ? null : "sort")} data-testid="lesson-sort">
+            排序 · {SORT_LABEL[sort]}
+          </button>
+          {menu === "sort" && (
+            <div className="rd-popover" role="menu" aria-label="排序">
+              {LESSON_SORTS.map((id) => (
+                <button key={id} type="button" role="menuitem" className={sort === id ? "is-on" : ""} onClick={() => { setSort(id); setMenu(null); }}>{SORT_LABEL[id]}</button>
+              ))}
+            </div>
+          )}
+        </div>
+        <button className="rd-btn rd-btn-primary" type="button" onClick={() => setImporting(true)} data-testid="import-open">
+          <Plus size={16} /> 导入
+        </button>
       </div>
+
+      {!rows.length ? (
+        <div className="rd-empty rd-empty-lg">
+          <p>{st.lessons.length ? "没有符合筛选的课。" : "还没有课。导入一个 YouTube 链接，或先看示例。"}</p>
+          {!st.lessons.length && (
+            <button className="rd-btn" type="button" onClick={trySample}>
+              <BookOpen size={16} /> 试试示例
+            </button>
+          )}
+        </div>
+      ) : view === "table" ? (
+        <div className="rd-table-wrap">
+          <table className="rd-table">
+            <thead>
+              <tr>
+                <th>标题</th>
+                <th>类型</th>
+                <th>词</th>
+                <th>已知</th>
+                <th>打开</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id} data-testid="lesson-card">
+                  <td>
+                    <a href={`#/reader?l=${row.id}`}>{row.title}</a>
+                    {row.author && <small>{row.author}</small>}
+                  </td>
+                  <td>{row.video ? "视频" : "文本"}</td>
+                  <td className="num">{row.unique}</td>
+                  <td className="num">{row.known}%</td>
+                  <td>{openedLabel(row.opened || row.created)}</td>
+                  <td><DeleteButton armed={armed === row.id} onClick={() => drop(row.id)} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : view === "board" ? (
+        <div className="rd-board">
+          {LANES.map((id) => {
+            const laneRows = rows.filter((row) => row.lane === id);
+            return (
+              <section key={id}>
+                <header>
+                  {LANE_LABEL[id]} <span>{laneRows.length}</span>
+                </header>
+                {laneRows.map((row) => (
+                  <LessonTile key={row.id} row={row} armed={armed === row.id} onDelete={() => drop(row.id)} />
+                ))}
+              </section>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rd-lib">
+          {rows.map((row) => (
+            <LessonTile key={row.id} row={row} armed={armed === row.id} onDelete={() => drop(row.id)} />
+          ))}
+        </div>
+      )}
       <ImportSheet open={importing} onClose={() => setImporting(false)} />
     </div>
+  );
+}
+
+function LessonTile({ row, armed, onDelete }: { row: LessonRow; armed: boolean; onDelete: () => void }) {
+  return (
+    <article className="rd-card" data-testid="lesson-card">
+      <a className="rd-card-hit" href={`#/reader?l=${row.id}`}>
+        <b>{row.title}</b>
+        <span className="rd-card-meta">
+          {row.video ? "视频 · " : ""}
+          {row.author ? `${row.author} · ` : ""}
+          {row.unique} 词 · <i className="dot dot-blue" />
+          {row.blue} · <i className="dot dot-yellow" />
+          {row.learning}
+        </span>
+        <span className="rd-bar">
+          <span style={{ width: `${row.known}%` }} />
+        </span>
+        <span className="rd-card-foot">
+          <span>{LANE_LABEL[row.lane]} · {row.known}% 已知</span>
+          {row.video && <Youtube size={12} />}
+        </span>
+      </a>
+      <DeleteButton armed={armed} onClick={onDelete} />
+    </article>
+  );
+}
+
+function DeleteButton({ armed, onClick }: { armed: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className={`rd-del ${armed ? "is-armed" : ""}`}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
+      aria-label={armed ? "确认删除" : "删除课程"}
+      data-testid="lesson-delete"
+    >
+      {armed ? "删除" : <Trash2 size={14} />}
+    </button>
   );
 }
 
@@ -624,7 +808,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
             className="rd-icon"
             onClick={() => {
               if (confirm("删除这节课？语料库里的词会保留。")) {
-                reader.removeLesson(lesson.id);
+                forgetLesson(lesson.id);
                 go({ page: "reader" });
               }
             }}
