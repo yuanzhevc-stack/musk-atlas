@@ -34,6 +34,20 @@ test("opening a lesson uses a verified full file and never a sentence clip", () 
   assert.equal(JSON.parse(localStorage.getItem("musk-atlas:reader:v1")!).items.oldword.meaning, "旧词保留");
 });
 
+test("a replaced video stays local and forgets the previous file address", () => {
+  mem.clear();
+  const v = "kmyvBlKYfic";
+  const previous = fullMediaUrl(v).split("?")[0];
+  localStorage.setItem(
+    "musk-atlas:full-ready:v1",
+    JSON.stringify({ version: 1, byVideo: { [v]: { url: previous, bytes: 51_785_307, duration: 642 } } }),
+  );
+  const rec = rememberedReady(v);
+  assert.notEqual(fullMediaUrl(v), previous);
+  assert.equal(rec?.url, fullMediaUrl(v));
+  assert.equal(openingSource(v), "local");
+});
+
 test("a verified cache uses the stored file on this visit", () => {
   assert.equal(adoptReady("online", "playing", true), "local");
   assert.equal(adoptReady("online", "paused", true), "local");

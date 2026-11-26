@@ -5,7 +5,13 @@ import { lessonCache, type SourceChoice } from "./hostedLesson";
 const TTS_URL = "https://musk-atlas-tts.yuanzhevc.workers.dev";
 
 export const PUBLIC_BASE = "https://pub-ad0e50befa7b4387a7d73a8c8a796eb3.r2.dev";
-export const fullMediaUrl = (v: string) => `${PUBLIC_BASE}/full/${v}.mp4`;
+/** Bump when a stored file is replaced, so the browser does not keep the previous bytes. */
+const MEDIA_REV: Record<string, string> = { kmyvBlKYfic: "2" };
+export const fullMediaUrl = (v: string) => {
+  const base = `${PUBLIC_BASE}/full/${v}.mp4`;
+  const rev = MEDIA_REV[v];
+  return rev ? `${base}?r=${rev}` : base;
+};
 
 export type JobStatus = "queued" | "running" | "ready" | "refused" | "failed";
 
@@ -53,9 +59,15 @@ function writeJson(key: string, value: unknown) {
 export function rememberedReady(videoId: string): { url: string; bytes: number; duration: number } | null {
   const store = readJson<ReadyStore>(READY_KEY, { version: 1, byVideo: {} });
   const rec = store.byVideo?.[videoId];
-  if (!rec || rec.url !== fullMediaUrl(videoId) || rec.url.includes("/clips/")) return null;
+  const expected = fullMediaUrl(videoId);
+  const bare = (url: string) => url.split("?")[0];
+  if (!rec || bare(rec.url) !== bare(expected) || rec.url.includes("/clips/")) return null;
   if (rec.bytes < 2_000_000) return null;
   if (rec.duration > 0 && rec.duration < 20) return null;
+  if (rec.url !== expected) {
+    rec.url = expected;
+    writeJson(READY_KEY, store);
+  }
   return rec;
 }
 

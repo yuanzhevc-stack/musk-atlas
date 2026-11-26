@@ -15,7 +15,8 @@ import { lessonMedia } from "../reader/sync";
 import { VideoStudy } from "../reader/VideoStudy";
 import { gsel } from "../reader/select";
 import { captionsToLesson, clockOf, fetchCaptions, watchUrl, youtubeIdIn } from "../reader/youtube";
-import { retryFullCache } from "../reader/fullCache";
+import { fullMediaUrl, readFullCache, rememberedReady, retryFullCache } from "../reader/fullCache";
+import { retainMedia } from "../reader/mediaCache";
 import { Sheet } from "../ui/Sheet";
 import { toast } from "../ui/Toast";
 
@@ -74,6 +75,31 @@ function Library({ missing }: { missing: boolean }) {
   const [q, setQ] = useState("");
   const [menu, setMenu] = useState<"filter" | "sort" | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
+  const videoIds = st.lessons.map((ls) => ls.yt?.v || "").join("|");
+  useEffect(() => {
+    const ids = videoIds.split("|").filter(Boolean);
+    if (!ids.length) return;
+    let dead = false;
+    void (async () => {
+      const ready: { id: string; bytes: number }[] = [];
+      for (const id of ids) {
+        const mem = rememberedReady(id);
+        if (mem) {
+          ready.push({ id, bytes: mem.bytes });
+          continue;
+        }
+        const view = await readFullCache(id);
+        if (dead) return;
+        if (view.verified && view.bytes) ready.push({ id, bytes: view.bytes });
+      }
+      ready.sort((a, b) => a.bytes - b.bytes);
+      if (dead) return;
+      for (const row of ready) retainMedia(fullMediaUrl(row.id));
+    })();
+    return () => {
+      dead = true;
+    };
+  }, [videoIds]);
   useEffect(() => {
     try {
       localStorage.setItem(DESK_KEY, JSON.stringify({ view, kind, lane, sort }));

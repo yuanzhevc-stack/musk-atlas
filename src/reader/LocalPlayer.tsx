@@ -1,11 +1,10 @@
 /** Playback of a hosted full lesson. The clock is the file's own currentTime.
- *  A fragmented file starts from the first piece instead of waiting for the whole download. */
+ *  A file this browser has already kept starts from disk. Otherwise the faststart
+ *  file plays at once, and the whole file is kept for the next open. */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { PlayerHandle, PlayerPhase } from "./YoutubePlayer";
 import { clipReached } from "./lessonDesk";
-import { codecFromInit, fixFragment, pullMp4, sniffMp4 } from "./mp4Feed";
-
-const appendable = (bytes: Uint8Array): ArrayBuffer => bytes.slice().buffer;
+import { cachedBlobUrl, retainMedia } from "./mediaCache";
 
 export const LocalPlayer = forwardRef<PlayerHandle, {
   src: string;
@@ -32,7 +31,6 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
   const seenRef = useRef(false);
   phaseRef.current = phase;
   const [wait, setWait] = useState(true);
-  const [pct, setPct] = useState<number | null>(null);
   onTimeRef.current = onTime;
   onPhaseRef.current = onPhase;
   onDurationRef.current = onDuration;
@@ -112,166 +110,49 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
     const v = video.current;
     if (!v || !src) return;
     let dead = false;
+    let blobUrl = "";
     seenRef.current = false;
     setWait(true);
-    setPct(null);
-    let objectUrl = "";
-    let fetchDone = false;
-    const ac = new AbortController();
-    const pending: ArrayBuffer[] = [];
-    let source: MediaSource | null = null;
-    let buffer: SourceBuffer | null = null;
-    let opened = false;
-    let failed = false;
 
-    const bufferedThrough = (target: number) => covers(v, target);
-
-    const tryStart = () => {
-      if (dead || !wantPlay.current) return;
-      const target = Math.max(0, initialRef.current);
-      if (target > 0.2 && !bufferedThrough(target)) return;
-      if (!v.buffered.length) return;
-      if (Math.abs(v.currentTime - target) > 0.4 && bufferedThrough(target)) {
-        try { v.currentTime = target; } catch { /* not seekable yet */ }
-      }
-      if (v.paused) startPlayback();
-    };
-
-    const pump = () => {
-      if (!buffer || buffer.updating || failed) return;
-      const next = pending.shift();
-      if (!next) {
-        if (fetchDone && source && source.readyState === "open") {
-          const end = v.buffered.length ? v.buffered.end(v.buffered.length - 1) : 0;
-          if (end > 1) {
-            try { source.duration = end; } catch { /* already ended */ }
-            onDurationRef.current?.(end);
-          }
-          try { source.endOfStream(); } catch { /* already closed */ }
-        }
-        tryStart();
-        return;
-      }
-      try {
-        buffer.appendBuffer(next);
-      } catch {
-        failOver();
-      }
-    };
-
-    const openStream = (init: Uint8Array) => {
-      if (source || typeof MediaSource === "undefined") {
-        failOver();
-        return;
-      }
-      const mime = `video/mp4; codecs="${codecFromInit(init)}"`;
-      if (!MediaSource.isTypeSupported(mime)) {
-        failOver();
-        return;
-      }
-      source = new MediaSource();
-      objectUrl = URL.createObjectURL(source);
-      v.src = objectUrl;
-      source.addEventListener("sourceopen", () => {
-        if (dead || !source || source.readyState !== "open") return;
-        try {
-          buffer = source.addSourceBuffer(mime);
-        } catch {
-          failOver();
-          return;
-        }
-        buffer.mode = "segments";
-        buffer.addEventListener("updateend", () => {
-          pump();
-          tryStart();
-        });
-        buffer.addEventListener("error", () => failOver());
-        opened = true;
-        pump();
-      });
-    };
-
-    const failOver = () => {
-      if (failed || dead) return;
-      failed = true;
-      ac.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      objectUrl = "";
-      v.src = src;
+    const arm = (url: string, fromDisk: boolean) => {
+      if (dead) return;
+      if (fromDisk) setWait(false);
+      v.src = url;
       const seekAndPlay = () => {
+        if (dead) return;
         const dur = v.duration;
         if (typeof dur === "number" && Number.isFinite(dur) && dur > 0) onDurationRef.current?.(dur);
-        try { v.currentTime = Math.max(0, initialRef.current); } catch { /* not seekable yet */ }
+        const target = Math.max(0, initialRef.current);
+        if (target > 0.25 && Math.abs(v.currentTime - target) > 0.35) {
+          try { v.currentTime = target; } catch { /* not seekable yet */ }
+        }
         if (wantPlay.current) startPlayback();
       };
-      v.addEventListener("loadedmetadata", seekAndPlay, { once: true });
+      if (v.readyState >= 1) seekAndPlay();
+      else v.addEventListener("loadedmetadata", seekAndPlay, { once: true });
     };
 
-    const run = async () => {
-      let res: Response;
-      try {
-        res = await fetch(src, { signal: ac.signal });
-      } catch {
-        if (!dead) failOver();
+    void (async () => {
+      const hit = await cachedBlobUrl(src);
+      if (dead) {
+        if (hit) URL.revokeObjectURL(hit);
         return;
       }
-      if (!res.ok || !res.body) {
-        failOver();
+      if (hit) {
+        blobUrl = hit;
+        arm(hit, true);
         return;
       }
-      const total = Number(res.headers.get("Content-Length")) || 0;
-      const reader = res.body.getReader();
-      let held = new Uint8Array(0);
-      let received = 0;
-      let initSent = false;
-      let kind: "unknown" | "fragmented" | "progressive" = "unknown";
-      try {
-        while (!dead && !failed) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          received += value.byteLength;
-          if (!dead) setPct(total > 0 ? Math.min(99, Math.round((received / total) * 100)) : null);
-          const merged = new Uint8Array(held.length + value.byteLength);
-          merged.set(held, 0);
-          merged.set(value, held.length);
-          held = merged;
-          if (kind === "unknown") kind = sniffMp4(held);
-          if (kind === "unknown" && held.length > 2_000_000) {
-            failOver();
-            return;
-          }
-          if (kind === "progressive") {
-            failOver();
-            return;
-          }
-          if (kind !== "fragmented") continue;
-          const piece = pullMp4(held, initSent);
-          if (piece.init) {
-            initSent = true;
-            pending.push(appendable(piece.init));
-            openStream(piece.init);
-          }
-          for (const seg of piece.segments) pending.push(appendable(fixFragment(seg)));
-          if (piece.used > 0) held = held.subarray(piece.used);
-          if (opened) pump();
-        }
-      } catch {
-        if (!dead && !failed) failOver();
-        return;
-      }
-      fetchDone = true;
-      if (!dead && !failed && kind !== "fragmented") failOver();
-      else pump();
-    };
-    void run();
+      arm(src, false);
+      retainMedia(src);
+    })();
 
     return () => {
       dead = true;
-      ac.abort();
       v.pause();
       v.removeAttribute("src");
       v.load();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
   }, [src]);
 
@@ -317,6 +198,7 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
         preload="auto"
         title={title}
         data-testid="local-video"
+        onLoadedData={() => setWait(false)}
         onTimeUpdate={emit}
         onSeeked={emit}
         onDurationChange={() => {
@@ -342,8 +224,7 @@ export const LocalPlayer = forwardRef<PlayerHandle, {
       />
       {wait && phase !== "blocked" && phase !== "error" && (
         <div className="vs-overlay" data-testid="local-buffer">
-          <p>{pct == null ? "正在缓冲…" : `正在缓冲 ${pct}%`}</p>
-          <p>开头到达就开始，不用等整段下完。</p>
+          <p>正在打开</p>
         </div>
       )}
       {phase === "blocked" && (
