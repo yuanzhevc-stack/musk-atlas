@@ -71,8 +71,18 @@ export function WordCard({
   }, [autoMusk]);
 
   const hints = m.senses.map((x) => x.text);
-  const save = (patch: Partial<Item>) => reader.upsert(text, { status: it?.status ?? 1, ...(!it?.meaning && patch.meaning === undefined && best.current ? { meaning: best.current } : {}), ...patch }, ctx);
+  const gloss = () => (it?.meaning || best.current).trim();
+  const save = (patch: Partial<Item>) => {
+    const written = patch.meaning !== undefined ? patch.meaning : it?.meaning ?? "";
+    const filled = written.trim() || (patch.meaning === undefined && !it?.meaning ? best.current.trim() : "");
+    const status = patch.status ?? it?.status ?? 1;
+    if (status >= 1 && status <= 4 && !filled) return;
+    reader.upsert(text, { status: it?.status ?? 1, ...(!it?.meaning && patch.meaning === undefined && best.current ? { meaning: best.current } : {}), ...patch }, ctx);
+  };
   const accept = (h: string) => save({ meaning: !it?.meaning ? h : it.meaning.includes(h) ? it.meaning : `${it.meaning}；${h}` });
+  const needGloss = () => {
+    (document.querySelector("[data-testid=panel] [data-meaning]") as HTMLTextAreaElement | null)?.focus();
+  };
 
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
@@ -88,7 +98,8 @@ export function WordCard({
       } else if (e.key === "Enter") {
         e.preventDefault();
         if (hints[hint]) accept(hints[hint]);
-        else save({});
+        else if (gloss()) save({});
+        else needGloss();
       }
     };
     window.addEventListener("keydown", on);
@@ -120,10 +131,19 @@ export function WordCard({
         </div>
       </header>
 
-      <StatusPicker value={it?.status ?? 0} onChange={onStatus} />
+      <StatusPicker
+        value={it?.status ?? 0}
+        onChange={(s) => {
+          if (!it && !gloss()) {
+            needGloss();
+            return;
+          }
+          onStatus(s);
+        }}
+      />
 
       {!it && (
-        <button className="rd-btn rd-btn-primary rd-save" onClick={() => save({})} data-testid="save">
+        <button className="rd-btn rd-btn-primary rd-save" onClick={() => (gloss() ? save({}) : needGloss())} disabled={!gloss()} data-testid="save">
           <Plus size={16} /> {isPhrase ? "保存短语" : "加入语料库"}
         </button>
       )}

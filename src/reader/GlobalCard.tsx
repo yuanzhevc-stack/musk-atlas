@@ -13,7 +13,12 @@ export function GlobalCard() {
   const setStatus = (s: Status) => {
     if (!sel || !k) return;
     const prev = reader.item(k);
-    reader.upsert(text, { status: s, ...(s >= 1 && s <= 4 && !prev?.meaning && best.current ? { meaning: best.current } : {}) }, sel.ctx);
+    const gloss = (prev?.meaning || best.current).trim();
+    if (!prev && !gloss) {
+      (document.querySelector("[data-testid=panel] [data-meaning]") as HTMLTextAreaElement | null)?.focus();
+      return;
+    }
+    reader.upsert(text, { status: s, ...(!prev?.meaning && gloss ? { meaning: gloss } : {}) }, sel.ctx);
   };
   useEffect(() => {
     const off = () => gsel.clear();

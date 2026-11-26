@@ -3,7 +3,7 @@ import type { Meanings } from "./dict";
 /** LingQ-style suggested meanings: tap to fill 释义. */
 export function MeaningList({ m, active = -1, onPick, onLex }: { m: Meanings; active?: number; onPick: (t: string) => void; onLex?: () => void }) {
   if (m.failed)
-    return <p className="rd-dim rd-mean-fail">释义来源都没有结果，可以自己写</p>;
+    return <p className="rd-dim rd-mean-fail">释义来源都没有结果。先写释义才能保存。</p>;
   return (
     <ul className="rd-hints" data-testid="meanings">
       {m.senses.map((s, i) => (

@@ -528,7 +528,12 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   const setStatus = (s: Status) => {
     if (!sel || !selKey) return;
     const prev = reader.item(selKey);
-    reader.upsert(selText, { status: s, ...(s >= 1 && s <= 4 && !prev?.meaning && best.current ? { meaning: best.current } : {}) }, selCtx);
+    const gloss = (prev?.meaning || best.current).trim();
+    if (!prev && !gloss) {
+      (document.querySelector("[data-testid=panel] [data-meaning]") as HTMLTextAreaElement | null)?.focus();
+      return;
+    }
+    reader.upsert(selText, { status: s, ...(!prev?.meaning && gloss ? { meaning: gloss } : {}) }, selCtx);
     if (s === 5 || s === -1) nav(1);
   };
 
