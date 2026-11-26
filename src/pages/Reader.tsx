@@ -9,7 +9,7 @@ import { StatusPicker, WordCard, type Sel } from "../reader/WordCard";
 export { StatusPicker };
 import { useAccount } from "../reader/cloud";
 import { forgetLesson } from "../reader/gone";
-import { DESK_VIEWS, KIND_FILTERS, KIND_LABEL, LANES, LANE_LABEL, LESSON_SORTS, SORT_LABEL, VIEW_LABEL, deskRows, type DeskView, type KindFilter, type Lane, type LessonRow, type LessonSort } from "../reader/libraryViews";
+import { DESK_VIEWS, KIND_FILTERS, KIND_LABEL, LANES, LANE_LABEL, LESSON_SORTS, SORT_LABEL, VIEW_LABEL, deskRows, videoAuthors, type DeskView, type KindFilter, type Lane, type LessonRow, type LessonSort } from "../reader/libraryViews";
 import { unmarkedWords } from "../reader/lessonDesk";
 import { normalize, parse, phraseIndex, reader, useReader, type Context, type Item, type Lesson, type Status, type Token } from "../reader/model";
 import { lessonMedia } from "../reader/sync";
@@ -42,13 +42,14 @@ export function ReaderPage({ l, s }: { l?: string; s?: string }) {
 const DESK_KEY = "musk-atlas:reader:desk";
 
 function readDesk() {
-  const fallback = { view: "gallery" as DeskView, kind: "all" as KindFilter, lane: "all" as Lane | "all", sort: "opened" as LessonSort };
+  const fallback = { view: "gallery" as DeskView, kind: "all" as KindFilter, lane: "all" as Lane | "all", author: "", sort: "opened" as LessonSort };
   try {
     const raw = JSON.parse(localStorage.getItem(DESK_KEY) || "{}") as Partial<typeof fallback>;
     return {
       view: DESK_VIEWS.includes(raw.view as DeskView) ? (raw.view as DeskView) : fallback.view,
       kind: KIND_FILTERS.includes(raw.kind as KindFilter) ? (raw.kind as KindFilter) : fallback.kind,
       lane: raw.lane === "all" || LANES.includes(raw.lane as Lane) ? (raw.lane as Lane | "all") : fallback.lane,
+      author: typeof raw.author === "string" ? raw.author.trim() : "",
       sort: LESSON_SORTS.includes(raw.sort as LessonSort) ? (raw.sort as LessonSort) : fallback.sort,
     };
   } catch {
@@ -72,6 +73,7 @@ function Library({ missing }: { missing: boolean }) {
   const [view, setView] = useState<DeskView>(saved.view);
   const [kind, setKind] = useState<KindFilter>(saved.kind);
   const [lane, setLane] = useState<Lane | "all">(saved.lane);
+  const [author, setAuthor] = useState(saved.author);
   const [sort, setSort] = useState<LessonSort>(saved.sort);
   const [q, setQ] = useState("");
   const [menu, setMenu] = useState<"filter" | "sort" | null>(null);
@@ -103,13 +105,14 @@ function Library({ missing }: { missing: boolean }) {
   }, [videoIds]);
   useEffect(() => {
     try {
-      localStorage.setItem(DESK_KEY, JSON.stringify({ view, kind, lane, sort }));
+      localStorage.setItem(DESK_KEY, JSON.stringify({ view, kind, lane, author, sort }));
     } catch {
       /* a private window can refuse the write; the choice still applies now */
     }
-  }, [view, kind, lane, sort]);
-  const rows = useMemo(() => deskRows(st.lessons, st.items, { q, kind, lane, sort }), [st.lessons, st.items, q, kind, lane, sort]);
-  const filtering = !!q.trim() || kind !== "all" || lane !== "all";
+  }, [view, kind, lane, author, sort]);
+  const authors = useMemo(() => videoAuthors(st.lessons), [st.lessons]);
+  const rows = useMemo(() => deskRows(st.lessons, st.items, { q, kind, lane, author, sort }), [st.lessons, st.items, q, kind, lane, author, sort]);
+  const filtering = !!q.trim() || kind !== "all" || lane !== "all" || !!author;
   const drop = (id: string) => {
     if (armed !== id) {
       setArmed(id);
@@ -175,8 +178,19 @@ function Library({ missing }: { missing: boolean }) {
                   <button key={id} type="button" className={lane === id ? "is-on" : ""} onClick={() => setLane(id)}>{LANE_LABEL[id]}</button>
                 ))}
               </div>
+              {authors.length > 0 && (
+                <>
+                  <p>作者</p>
+                  <div className="rd-author-picks">
+                    <button type="button" className={!author ? "is-on" : ""} onClick={() => setAuthor("")}>全部</button>
+                    {authors.map((name) => (
+                      <button key={name} type="button" className={author === name ? "is-on" : ""} onClick={() => setAuthor(name)} data-testid="author-filter">{name}</button>
+                    ))}
+                  </div>
+                </>
+              )}
               {filtering && (
-                <button type="button" className="rd-link" onClick={() => { setKind("all"); setLane("all"); setQ(""); }}>清除筛选</button>
+                <button type="button" className="rd-link" onClick={() => { setKind("all"); setLane("all"); setAuthor(""); setQ(""); }}>清除筛选</button>
               )}
             </div>
           )}
@@ -213,6 +227,7 @@ function Library({ missing }: { missing: boolean }) {
             <thead>
               <tr>
                 <th>标题</th>
+                <th>作者</th>
                 <th>类型</th>
                 <th>词</th>
                 <th>已知</th>
@@ -225,8 +240,8 @@ function Library({ missing }: { missing: boolean }) {
                 <tr key={row.id} data-testid="lesson-card">
                   <td>
                     <a href={`#/reader?l=${row.id}`}>{row.title}</a>
-                    {row.author && <small>{row.author}</small>}
                   </td>
+                  <td>{row.author || "—"}</td>
                   <td>{row.video ? "视频" : "文本"}</td>
                   <td className="num">{row.unique}</td>
                   <td className="num">{row.known}%</td>

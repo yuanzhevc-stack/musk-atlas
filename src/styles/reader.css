@@ -278,6 +278,7 @@
   top: calc(100% + 6px);
   left: 0;
   min-width: 220px;
+  max-width: min(360px, calc(100vw - 32px));
   padding: 12px;
   border-radius: 14px;
   background: var(--card);
@@ -297,6 +298,7 @@
   flex-wrap: wrap;
   gap: 6px;
 }
+.rd-author-picks { max-height: 180px; overflow: auto; }
 .rd-popover button {
   padding: 6px 10px;
   border-radius: 999px;

@@ -10,7 +10,7 @@ export type KindFilter = (typeof KIND_FILTERS)[number];
 export const LANES = ["fresh", "going", "known"] as const;
 export type Lane = (typeof LANES)[number];
 
-export const LESSON_SORTS = ["opened", "created", "title", "known", "blue"] as const;
+export const LESSON_SORTS = ["opened", "created", "title", "author", "known", "blue"] as const;
 export type LessonSort = (typeof LESSON_SORTS)[number];
 
 export const VIEW_LABEL: Record<DeskView, string> = { gallery: "画廊", table: "表格", board: "看板" };
@@ -20,6 +20,7 @@ export const SORT_LABEL: Record<LessonSort, string> = {
   opened: "最近打开",
   created: "最近加入",
   title: "标题",
+  author: "作者",
   known: "已知比例",
   blue: "生词最多",
 };
@@ -42,6 +43,8 @@ export interface DeskQuery {
   q: string;
   kind: KindFilter;
   lane: Lane | "all";
+  /** Empty means every author. Compared to `yt.author`. */
+  author: string;
   sort: LessonSort;
 }
 
@@ -73,12 +76,26 @@ export function lessonRow(lesson: Lesson, items: Record<string, Item>): LessonRo
   };
 }
 
-export function filterLessons(rows: LessonRow[], query: Pick<DeskQuery, "q" | "kind" | "lane">): LessonRow[] {
+export function videoAuthors(lessons: Lesson[]): string[] {
+  const names = new Set<string>();
+  for (const lesson of lessons) {
+    const name = lesson.yt?.author?.trim();
+    if (name) names.add(name);
+  }
+  return [...names].sort((a, b) => a.localeCompare(b, "zh"));
+}
+
+function sameAuthor(row: string, picked: string) {
+  return row.trim().toLowerCase() === picked.trim().toLowerCase();
+}
+
+export function filterLessons(rows: LessonRow[], query: Pick<DeskQuery, "q" | "kind" | "lane" | "author">): LessonRow[] {
   const q = query.q.trim().toLowerCase();
   return rows.filter((row) => {
     if (query.kind === "video" && !row.video) return false;
     if (query.kind === "text" && row.video) return false;
     if (query.lane !== "all" && row.lane !== query.lane) return false;
+    if (query.author && !sameAuthor(row.author, query.author)) return false;
     if (!q) return true;
     return `${row.title} ${row.author}`.toLowerCase().includes(q);
   });
@@ -89,6 +106,12 @@ export function sortLessons(rows: LessonRow[], sort: LessonSort): LessonRow[] {
   const byTitle = (a: LessonRow, b: LessonRow) => a.title.localeCompare(b.title, "zh");
   copy.sort((a, b) => {
     if (sort === "title") return byTitle(a, b);
+    if (sort === "author") {
+      const aa = a.author.trim();
+      const bb = b.author.trim();
+      if (!aa !== !bb) return aa ? -1 : 1;
+      return aa.localeCompare(bb, "zh") || byTitle(a, b);
+    }
     if (sort === "created") return b.created - a.created || byTitle(a, b);
     if (sort === "known") return b.known - a.known || byTitle(a, b);
     if (sort === "blue") return b.blue - a.blue || byTitle(a, b);
