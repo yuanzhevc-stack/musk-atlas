@@ -5,10 +5,10 @@
   --rd-read: "New York", ui-serif, "Iowan Old Style", Charter, Georgia, "Songti SC", serif;
   --rd-blue: rgba(10, 132, 255, 0.2);
   --rd-blue-ink: #0a84ff;
-  --rd-y1: rgba(255, 204, 0, 0.55);
-  --rd-y2: rgba(255, 204, 0, 0.38);
-  --rd-y3: rgba(255, 204, 0, 0.24);
-  --rd-y4: rgba(255, 204, 0, 0.12);
+  --rd-y1: rgba(52, 199, 89, 0.5);
+  --rd-y2: rgba(52, 199, 89, 0.36);
+  --rd-y3: rgba(52, 199, 89, 0.22);
+  --rd-y4: rgba(52, 199, 89, 0.12);
   --rd-glass: color-mix(in oklab, var(--card) 74%, transparent);
   --rd-hair: color-mix(in oklab, var(--ink) 9%, transparent);
   --rd-fill: color-mix(in oklab, var(--ink) 5%, transparent);
@@ -229,7 +229,7 @@
   margin-left: 2px;
 }
 .dot-blue { background: var(--rd-blue-ink); opacity: 0.7; }
-.dot-yellow { background: #ffcc00; }
+.dot-yellow { background: #34c759; }
 .rd-bar {
   margin-top: auto;
   height: 4px;
@@ -560,24 +560,24 @@
 .w.s-1 { background: var(--rd-y1); }
 .w.s-2 { background: var(--rd-y2); }
 .w.s-3 { background: var(--rd-y3); }
-.w.s-4 { background: var(--rd-y4); box-shadow: inset 0 -1.5px 0 rgba(255, 204, 0, 0.6); }
+.w.s-4 { background: var(--rd-y4); box-shadow: inset 0 -1.5px 0 rgba(52, 199, 89, 0.7); }
 .w.s-known,
 .w.s-ign { background: transparent; }
 .rd-text .w:hover { box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--rd-blue-ink) 45%, transparent); }
 .rd-text span.ph:not(.w) {
   text-decoration: underline;
-  text-decoration-color: #ffcc00;
+  text-decoration-color: #34c759;
   text-decoration-thickness: 2px;
   text-underline-offset: 0.22em;
 }
 .rd-text .ph {
   text-decoration: underline;
-  text-decoration-color: #ffcc00;
+  text-decoration-color: #34c759;
   text-decoration-thickness: 2px;
   text-underline-offset: 0.22em;
 }
 .rd-text .in-sel {
-  background: color-mix(in oklab, var(--rd-blue-ink) 30%, transparent) !important;
+  background: color-mix(in oklab, #34c759 42%, transparent) !important;
   box-shadow: none !important;
 }
 .rd-text .w.in-sel {
@@ -586,14 +586,14 @@
 .rd-text .w.sel-a { border-top-left-radius: 5px; border-bottom-left-radius: 5px; }
 .rd-text .w.sel-b { border-top-right-radius: 5px; border-bottom-right-radius: 5px; }
 .rd-text .w.sel-a.sel-b {
-  box-shadow: 0 0 0 2px var(--rd-blue-ink) !important;
-  background: color-mix(in oklab, var(--rd-blue-ink) 22%, transparent) !important;
+  box-shadow: 0 0 0 2px #17803d !important;
+  background: color-mix(in oklab, #34c759 36%, transparent) !important;
 }
 .rd-text .is-flash {
   animation: rd-flash 2.4s var(--ease);
 }
 @keyframes rd-flash {
-  0%, 60% { background-color: color-mix(in oklab, #ffcc00 45%, transparent); }
+  0%, 60% { background-color: color-mix(in oklab, #34c759 45%, transparent); }
 }
 .rd-pager {
   display: flex;
@@ -827,7 +827,7 @@
 }
 .rd-page mark,
 .rd-sheet mark {
-  background: color-mix(in oklab, #ffcc00 45%, transparent);
+  background: color-mix(in oklab, #34c759 45%, transparent);
   color: inherit;
   border-radius: 3px;
   padding: 0 2px;
@@ -1144,15 +1144,15 @@
   -webkit-tap-highlight-color: transparent;
 }
 .mt .mw.s-new { background: rgba(10, 132, 255, 0.09); }
-.mt .mw.s-1 { background: rgba(255, 204, 0, 0.32); }
-.mt .mw.s-2 { background: rgba(255, 204, 0, 0.22); }
-.mt .mw.s-3 { background: rgba(255, 204, 0, 0.14); }
-.mt .mw.s-4 { background: rgba(255, 204, 0, 0.08); }
+.mt .mw.s-1 { background: rgba(52, 199, 89, 0.32); }
+.mt .mw.s-2 { background: rgba(52, 199, 89, 0.22); }
+.mt .mw.s-3 { background: rgba(52, 199, 89, 0.14); }
+.mt .mw.s-4 { background: rgba(52, 199, 89, 0.08); }
 .mt .w-hit { background: var(--mark); border-radius: 4px; }
 .mt .mw.w-hit { background: var(--mark); }
 @media (hover: hover) { .mt .mw:hover { background: rgba(10, 132, 255, 0.2); } }
 .mt .in-sel,
-.mt .mw.in-sel { background: rgba(10, 132, 255, 0.28); box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.45); }
+.mt .mw.in-sel { background: rgba(52, 199, 89, 0.34); box-shadow: 0 0 0 1px rgba(23, 128, 61, 0.45); }
 .mt .mw.w-live { color: var(--terra); }
 .musk-hit-main, .rd-musk-list button { user-select: none; -webkit-user-select: none; }
 
@@ -2077,10 +2077,10 @@ body.is-study .main { padding: 0; margin: 0; max-width: none; }
   --rd-read: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Segoe UI", sans-serif;
   --rd-blue: rgba(10, 132, 255, 0.16);
   --rd-blue-ink: #0a84ff;
-  --rd-y1: rgba(255, 204, 0, 0.55);
-  --rd-y2: rgba(255, 204, 0, 0.38);
-  --rd-y3: rgba(255, 204, 0, 0.24);
-  --rd-y4: rgba(255, 204, 0, 0.16);
+  --rd-y1: rgba(52, 199, 89, 0.5);
+  --rd-y2: rgba(52, 199, 89, 0.36);
+  --rd-y3: rgba(52, 199, 89, 0.22);
+  --rd-y4: rgba(52, 199, 89, 0.16);
   --rd-fill: #f3f4f6;
   --rd-fill-2: #e8eaee;
   --rd-hair: rgba(28, 28, 30, 0.1);
@@ -2635,11 +2635,12 @@ body.is-study .main { padding: 0; margin: 0; max-width: none; }
 .desk .rd-text .w.s-1,
 .desk .rd-text .w.s-2,
 .desk .rd-text .w.s-3,
+.desk .rd-text .w.s-4,
 .desk .rd-text .w.ph {
   padding: 0 4px;
   border-radius: 6px;
-  background: #fde4d4;
-  color: #c2410c;
+  background: #d8f5e4;
+  color: #137a34;
   box-shadow: none;
 }
 .desk .rd-text .w.s-new { padding: 0 4px; border-radius: 6px; background: #e7f0ff; }

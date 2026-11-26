@@ -10,6 +10,7 @@ export { StatusPicker };
 import { useAccount } from "../reader/cloud";
 import { forgetLesson } from "../reader/gone";
 import { DESK_VIEWS, KIND_FILTERS, KIND_LABEL, LANES, LANE_LABEL, LESSON_SORTS, SORT_LABEL, VIEW_LABEL, deskRows, type DeskView, type KindFilter, type Lane, type LessonRow, type LessonSort } from "../reader/libraryViews";
+import { unmarkedWords } from "../reader/lessonDesk";
 import { normalize, parse, phraseIndex, reader, useReader, type Context, type Item, type Lesson, type Status, type Token } from "../reader/model";
 import { lessonMedia } from "../reader/sync";
 import { VideoStudy } from "../reader/VideoStudy";
@@ -535,6 +536,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   const turn = (d: 1 | -1) => {
     const n = page + d;
     if (n < 0 || n >= doc.pages.length) return;
+    if (d > 0) reader.markKnown(unmarkedWords(tokens, new Set(Object.keys(st.items)), phraseAt, sel));
     setSel(null);
     setPage(n);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -625,6 +627,7 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
   const goSent = (d: 1 | -1) => {
     const n = cur + d;
     if (n < 0 || n >= doc.sentences.length) return;
+    if (d > 0) reader.markKnown(unmarkedWords(tokens, new Set(Object.keys(st.items)), phraseAt, sel));
     setSel(null);
     setCur(n);
     const pi = sidPage.get(n);

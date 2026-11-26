@@ -8,7 +8,7 @@ import { ecdict, translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
 import { saveChoice, type SourceChoice } from "./hostedLesson";
 import { adoptReady, cacheStatusLine, downloadPercent, enqueueFullCache, forgetReady, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
-import { DESK_MODES, MODE_LABEL, clipReached, dragPhrase, keptCaption, loopDecision, loopRange, nextSpeed, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, showsChinese, type DeskMode, type RowDisclosure } from "./lessonDesk";
+import { DESK_MODES, MODE_LABEL, clipReached, dragPhrase, keptCaption, loopDecision, loopRange, nextSpeed, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, showsChinese, unmarkedWords, type DeskMode, type RowDisclosure } from "./lessonDesk";
 import { LessonPractice } from "./LessonPractice";
 import { readNote, writeNote } from "./lessonNotes";
 import { centerScroll, followAllowed, lessonMedia, sentenceAt, sentenceSpan, shouldRecenter } from "./sync";
@@ -289,6 +289,7 @@ export function VideoStudy({
   const step = (d: 1 | -1) => {
     const n = curRef.current + d;
     if (n < 0 || n >= lines.length) return;
+    if (d > 0) reader.markKnown(unmarkedWords(lines[curRef.current]?.tokens ?? [], new Set(Object.keys(itemsRef.current)), phraseRef.current, selRef.current));
     jump(n);
   };
   const applyPhrase = (start: number, end: number) => {

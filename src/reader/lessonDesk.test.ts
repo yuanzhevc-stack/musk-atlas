@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkCloze, checkWords, clipReached, clozePieces, dragPhrase, holdSentence, keptCaption, loopDecision, loopRange, nextSpeed, personalCards, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase } from "./lessonDesk.ts";
+import { checkCloze, checkWords, clipReached, clozePieces, dragPhrase, holdSentence, keptCaption, loopDecision, loopRange, nextSpeed, personalCards, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, unmarkedWords } from "./lessonDesk.ts";
 
 test("dictation compares words and ignores punctuation", () => {
   const hit = checkWords("Now we go this way.", "now we go this way");
@@ -81,6 +81,19 @@ test("a word press looks up, a drag does not seek, and empty row space may seek"
   assert.equal(rowPointer({ word: true, dragged: true }), "keep");
   assert.equal(rowPointer({ word: false, dragged: true }), "keep");
   assert.equal(rowPointer({ word: false, dragged: false }), "seek");
+});
+
+test("leaving a page keeps saved and selected words, and names the rest once", () => {
+  const tokens = [
+    { i: 0, key: "hack", text: "hack" },
+    { i: 1, key: "into", text: "into" },
+    { i: 2, key: "hack", text: "Hack" },
+    { i: 3, key: "software", text: "software" },
+    { i: 4, text: "." },
+  ];
+  const phrase = new Map<number, unknown>([[1, { key: "hack into" }]]);
+  assert.deepEqual(unmarkedWords(tokens, new Set(["software"]), phrase, { from: 0, to: 0 }), []);
+  assert.deepEqual(unmarkedWords(tokens, new Set(["software"]), phrase, null), ["hack"]);
 });
 
 test("a drag across words is a phrase and a single press is not", () => {

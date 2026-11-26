@@ -217,3 +217,25 @@ export function selectedPhrase(indexes: number[]): { from: number; to: number } 
   if (ids.length < 2) return null;
   return { from: Math.min(...ids), to: Math.max(...ids) };
 }
+
+/** Blue words left behind when the reader moves on. Saved words, saved phrases, and the open selection stay. */
+export function unmarkedWords(
+  tokens: { i: number; key?: string; text: string }[],
+  saved: ReadonlySet<string>,
+  phraseAt: ReadonlyMap<number, unknown>,
+  keep: { from: number; to: number } | null = null,
+): string[] {
+  const held = new Set<string>();
+  if (keep) {
+    for (const t of tokens) if (t.key && t.i >= keep.from && t.i <= keep.to) held.add(t.key);
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const t of tokens) {
+    if (!t.key || saved.has(t.key) || phraseAt.has(t.i) || held.has(t.key)) continue;
+    if (seen.has(t.key)) continue;
+    seen.add(t.key);
+    out.push(t.text);
+  }
+  return out;
+}
