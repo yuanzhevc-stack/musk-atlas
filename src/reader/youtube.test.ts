@@ -81,6 +81,24 @@ test("all-caps captions become sentence case and normal captions stay", async ()
   assert.equal(sentenceCase("Elon already wrote this in normal case."), "Elon already wrote this in normal case.");
 });
 
+test("an unpunctuated caption is not cut in the middle of a phrase", async () => {
+  const { breakUnpunctuated, speechLines } = await import("./youtube.ts");
+  const raw = "have you ever had that feeling of going on social media and feeling like compared to you everyone else is doing something way more interesting they say comparison really makes for a happy man but sometimes it can be hard to ignore what everyone else is doing";
+  const lines = breakUnpunctuated(raw);
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0], "Have you ever had that feeling of going on social media and feeling like compared to you everyone else is doing something way more interesting they say comparison really makes for a happy man?");
+  assert.equal(lines[1], "But sometimes it can be hard to ignore what everyone else is doing.");
+  assert.equal(lines.some((line) => line.endsWith("way more.")), false);
+  const cut = raw.indexOf(" they say");
+  const spoken = speechLines([
+    [0, 12000, raw.slice(0, cut)],
+    [12000, 14000, raw.slice(cut + 1)],
+  ]);
+  assert.equal(spoken.length, 2);
+  assert.equal(spoken[1].text.startsWith("But sometimes"), true);
+  assert.ok(spoken[1].ms > spoken[0].ms);
+});
+
 test("a youtube link buried in a note is still the video id", async () => {
   const { youtubeIdIn } = await import("./youtube.ts");
   assert.equal(youtubeIdIn("notes https://www.youtube.com/watch?v=kmyvBlKYfic more"), "kmyvBlKYfic");

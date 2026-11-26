@@ -106,12 +106,52 @@ export function splitSpeech(text: string): string[] {
   return splitSentences(text.trim()).map((line) => line.trim()).filter(Boolean);
 }
 
-const CLAUSE_BREAK = /[,;]\s*$/;
-const BUT_START = /^but\b/i;
+const SPOKEN_START = /^(but|so|now|luckily|however|plus|yes|for example|in his book|a good example|thank you|the third point)\b/i;
+const CANNOT_END = /^(a|an|the|to|of|in|on|for|and|or|but|with|from|that|this|into|about|like|as|at|by|if|so|than|then|your|my|our|their|his|her|its|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|can|could|should|just|very|more|most|not|no|nor|because|which|who|when|where|what|how|why|after|before|although|though|while|during|through|over|under|between|without|within|also|even|really|it's|that's|there's|i'm|i've)$/i;
+
+function barelyPunctuated(text: string): boolean {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length < 40) return false;
+  const stops = text.match(/[.!?]/g)?.length ?? 0;
+  return stops * 40 < words.length;
+}
+
+function canEndWord(word: string): boolean {
+  const bare = word.replace(/[^A-Za-z']/g, "");
+  return Boolean(bare) && !CANNOT_END.test(bare);
+}
+
+function finishSpoken(text: string): string {
+  const trimmed = text.replace(/\s+/g, " ").trim();
+  if (!trimmed) return "";
+  const lead = trimmed.replace(/^[a-z]/, (ch) => ch.toUpperCase());
+  if (/[.!?…]["'”’)\]]*$/.test(lead)) return lead;
+  const question = /^(have you|are we|are you|do you|did you|what|why|how|who|when|where|can you)\b/i.test(lead);
+  return `${lead}${question ? "?" : "."}`;
+}
+
+/** Auto captions often have no periods. Break only before a new clause, never in the middle of a phrase. */
+export function breakUnpunctuated(text: string): string[] {
+  const words = text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 1; i < words.length; i++) {
+    if (i - start < 12 || !canEndWord(words[i - 1])) continue;
+    const rest = words.slice(i, i + 4).join(" ");
+    if (!SPOKEN_START.test(rest)) continue;
+    parts.push(words.slice(start, i).join(" "));
+    start = i;
+  }
+  parts.push(words.slice(start).join(" "));
+  return parts.map(finishSpoken).filter(Boolean);
+}
 
 function endsSentence(text: string): boolean {
   return /[.!?…]["'”’)\]]*\s*$/.test(text);
 }
+
+const CLAUSE_BREAK = /[,;]\s*$/;
+const BUT_START = /^but\b/i;
 
 /** One study sentence. Caption lines join until a real stop, or a comma followed by "but". */
 export function speechLines(segs: [number, number, string][]): { text: string; ms: number }[] {
@@ -144,7 +184,21 @@ export function speechLines(segs: [number, number, string][]): { text: string; m
     if (endsSentence(buf.map((part) => part.text).join(" "))) flush();
   }
   flush();
-  return lines;
+  if (!lines.length) return lines;
+  const joined = pieces.map((piece) => piece.text).join(" ");
+  if (!barelyPunctuated(joined)) return lines;
+  const words = pieces.flatMap((piece) => {
+    const bits = piece.text.split(/\s+/).filter(Boolean);
+    return bits.map((word) => ({ word, ms: piece.ms }));
+  });
+  const spoken = breakUnpunctuated(words.map((piece) => piece.word).join(" "));
+  let at = 0;
+  return spoken.map((text) => {
+    const count = text.replace(/[.!?]/g, "").split(/\s+/).filter(Boolean).length;
+    const ms = words[Math.min(at, words.length - 1)]?.ms ?? 0;
+    at += count;
+    return { text, ms };
+  });
 }
 
 /** Captions -> lesson text. Fragments of one sentence share that sentence's start. */
