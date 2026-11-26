@@ -2044,7 +2044,9 @@ body.is-study .main { padding: 0; margin: 0; max-width: none; }
   max-height: min(70vh, 520px);
   z-index: 80;
 }
-/* The study desk is portaled to body. #root is its own layer, so the card has to leave that layer too. */
+/* The study desk is portaled to body. #root is its own layer, so the card has to leave that layer too.
+   Desk chrome is always light, but this card inherits body color. In dark theme that is cream ink
+   on the forced white card, which is unreadable. Pin the desk palette here. */
 .rd-aside.rd-study-card.is-open {
   position: fixed;
   z-index: 80;
@@ -2056,8 +2058,44 @@ body.is-study .main { padding: 0; margin: 0; max-width: none; }
   max-height: min(72dvh, 560px);
   transform: none;
   opacity: 1;
-  background: #fff;
   overflow: auto;
+  color: #1c1c1e;
+  color-scheme: light;
+  background: #fff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  --ink: #1c1c1e;
+  --ink-2: #3a3a3c;
+  --ink-3: #5c6370;
+  --ink-4: #8b909a;
+  --card: #fff;
+  --card-2: #f6f7f9;
+  --line: rgba(28, 28, 30, 0.1);
+  --line-strong: rgba(28, 28, 30, 0.16);
+  --rd-font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Segoe UI", sans-serif;
+  --rd-read: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Segoe UI", sans-serif;
+  --rd-blue: rgba(10, 132, 255, 0.16);
+  --rd-blue-ink: #0a84ff;
+  --rd-y1: rgba(255, 204, 0, 0.55);
+  --rd-y2: rgba(255, 204, 0, 0.38);
+  --rd-y3: rgba(255, 204, 0, 0.24);
+  --rd-y4: rgba(255, 204, 0, 0.16);
+  --rd-fill: #f3f4f6;
+  --rd-fill-2: #e8eaee;
+  --rd-hair: rgba(28, 28, 30, 0.1);
+  --rd-glass: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Segoe UI", sans-serif;
+}
+.rd-aside.rd-study-card .rd-panel-head h3,
+.rd-aside.rd-study-card .rd-ctx blockquote,
+.rd-aside.rd-study-card .rd-hints li > button,
+.rd-aside.rd-study-card textarea {
+  color: #1c1c1e;
+}
+.rd-aside.rd-study-card textarea::placeholder {
+  color: #8b909a;
+  opacity: 1;
 }
 .desk {
   position: fixed;
