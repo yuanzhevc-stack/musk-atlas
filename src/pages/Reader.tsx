@@ -1,5 +1,5 @@
 import { ArrowLeft, BookOpen, Bookmark, Youtube, X as Close, Check, ChevronLeft, Columns3, Languages, ChevronRight, ExternalLink, LayoutGrid, Pause, Play, Plus, Search, SlidersHorizontal, Table2, Trash2 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { go } from "../lib/router";
 import { speak, translate } from "../reader/dict";
@@ -10,7 +10,7 @@ export { StatusPicker };
 import { useAccount } from "../reader/cloud";
 import { forgetLesson } from "../reader/gone";
 import { DESK_VIEWS, KIND_FILTERS, KIND_LABEL, LANES, LANE_LABEL, LESSON_SORTS, SORT_LABEL, VIEW_LABEL, deskRows, videoAuthors, type DeskView, type KindFilter, type Lane, type LessonRow, type LessonSort } from "../reader/libraryViews";
-import { unmarkedWords } from "../reader/lessonDesk";
+import { unmarkedWords, highlightRuns } from "../reader/lessonDesk";
 import { normalize, parse, phraseIndex, reader, useReader, type Context, type Item, type Lesson, type Status, type Token } from "../reader/model";
 import { lessonMedia } from "../reader/sync";
 import { VideoStudy } from "../reader/VideoStudy";
@@ -739,46 +739,65 @@ function LessonView({ lesson, focusSid }: { lesson: Lesson; focusSid?: number })
                       </button>
                     );
                   })()}
-                {g.map((t) => {
-                  const ph = phraseAt.get(t.i);
-                  const inSel = !!sel && t.i >= sel.from && t.i <= sel.to;
-                  const fl = (flash === t.sid ? " is-flash" : "") + (tt.sid === t.sid ? " is-say" : "");
-                  if (!isWord(t))
-                    return (
-                      <Fragment key={t.i}>
-                        <span data-sid={t.sid} className={`${ph && t.i > ph.from && t.i < ph.to ? "ph" : ""}${inSel ? " in-sel" : ""}${fl}`}>
+                {(() => {
+                  const renderTok = (t: Token) => {
+                    const ph = phraseAt.get(t.i);
+                    const inSel = !!sel && t.i >= sel.from && t.i <= sel.to;
+                    const fl = (flash === t.sid ? " is-flash" : "") + (tt.sid === t.sid ? " is-say" : "");
+                    if (!isWord(t))
+                      return (
+                        <span key={t.i} data-sid={t.sid} className={`${ph && t.i > ph.from && t.i < ph.to ? "ph" : ""}${inSel ? " in-sel" : ""}${fl}`}>
                           {t.text}
                         </span>
-                      </Fragment>
+                      );
+                    const it = st.items[t.key!];
+                    return (
+                      <span
+                        key={t.i}
+                        data-ti={t.i}
+                        data-sid={t.sid}
+                        data-testid="tok"
+                        className={`w ${statusClass(it)}${ph ? " ph" : ""}${inSel ? " in-sel" : ""}${sel && sel.from === t.i ? " sel-a" : ""}${sel && sel.to === t.i ? " sel-b" : ""}${fl}`}
+                        onPointerDown={(e) => {
+                          if (e.pointerType === "mouse" && e.button === 0 && !e.shiftKey) drag.current = { start: t.i, moved: false };
+                        }}
+                        onPointerEnter={() => {
+                          const d = drag.current;
+                          if (!d || t.i === d.start) return;
+                          d.moved = true;
+                          anchor.current = d.start;
+                          setSel({ from: Math.min(d.start, t.i), to: Math.max(d.start, t.i) });
+                        }}
+                        onClick={(e) => {
+                          if (drag.current?.moved) return;
+                          selectWord(t.i, e.shiftKey);
+                        }}
+                      >
+                        {t.text}
+                      </span>
                     );
-                  const it = st.items[t.key!];
-                  return (
-                    <Fragment key={t.i}>
-                    <span
-                      data-ti={t.i}
-                      data-sid={t.sid}
-                      data-testid="tok"
-                      className={`w ${statusClass(it)}${ph ? " ph" : ""}${inSel ? " in-sel" : ""}${sel && sel.from === t.i ? " sel-a" : ""}${sel && sel.to === t.i ? " sel-b" : ""}${fl}`}
-                      onPointerDown={(e) => {
-                        if (e.pointerType === "mouse" && e.button === 0 && !e.shiftKey) drag.current = { start: t.i, moved: false };
-                      }}
-                      onPointerEnter={() => {
-                        const d = drag.current;
-                        if (!d || t.i === d.start) return;
-                        d.moved = true;
-                        anchor.current = d.start;
-                        setSel({ from: Math.min(d.start, t.i), to: Math.max(d.start, t.i) });
-                      }}
-                      onClick={(e) => {
-                        if (drag.current?.moved) return;
-                        selectWord(t.i, e.shiftKey);
-                      }}
-                    >
-                      {t.text}
-                    </span>
-                    </Fragment>
-                  );
-                })}
+                  };
+                  const marked = (t: Token) => {
+                    if (!t.key) return false;
+                    if (phraseAt.get(t.i)) return true;
+                    const it = st.items[t.key];
+                    return !!it && it.status >= 1 && it.status <= 4;
+                  };
+                  const runs = highlightRuns(g, marked);
+                  const nodes: ReactNode[] = [];
+                  let cursor = 0;
+                  for (const run of runs) {
+                    for (; cursor < run.from; cursor++) nodes.push(renderTok(g[cursor]));
+                    nodes.push(
+                      <span key={`hl-${g[run.from].i}`} className="hl-run">
+                        {g.slice(run.from, run.to + 1).map(renderTok)}
+                      </span>,
+                    );
+                    cursor = run.to + 1;
+                  }
+                  for (; cursor < g.length; cursor++) nodes.push(renderTok(g[cursor]));
+                  return nodes;
+                })()}
                 {!bare && lesson.yt?.times[g[0].sid] != null && (
                   <button className="rd-ts" onClick={() => setVideo({ t: lesson.yt!.times[g[0].sid], n: Date.now() })} data-testid="ts" title="跳到视频这里">
                     {clockOf(lesson.yt.times[g[0].sid])}

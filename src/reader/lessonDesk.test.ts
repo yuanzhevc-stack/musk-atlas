@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkCloze, checkWords, clipReached, clozePieces, dragPhrase, holdSentence, keptCaption, loopDecision, loopRange, nextSpeed, personalCards, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, unmarkedWords } from "./lessonDesk.ts";
+import { checkCloze, checkWords, clipReached, clozePieces, dragPhrase, highlightRuns, holdSentence, keptCaption, loopDecision, loopRange, nextSpeed, personalCards, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, unmarkedWords } from "./lessonDesk.ts";
 
 test("dictation compares words and ignores punctuation", () => {
   const hit = checkWords("Now we go this way.", "now we go this way");
@@ -116,4 +116,24 @@ test("cards are saved lesson words ordered by review time", () => {
     new Set(["costco"]),
   );
   assert.deepEqual(cards.map((c) => c.key), ["costco", "chicken"]);
+});
+
+test("adjacent saved words share one highlight and stop at an unmarked word", () => {
+  const tokens = ["for", " ", "the", " ", "rest", " ", "of", " ", "my", " ", "life", "."].map((text) => ({
+    key: /[A-Za-z]/.test(text) ? text : undefined,
+  }));
+  const saved = new Set(["for", "the", "rest", "of", "my", "life"]);
+  assert.deepEqual(
+    highlightRuns(tokens, (t) => !!t.key && saved.has(t.key)),
+    [{ from: 0, to: 10 }],
+  );
+  saved.delete("of");
+  assert.deepEqual(
+    highlightRuns(tokens, (t) => !!t.key && saved.has(t.key)),
+    [
+      { from: 0, to: 4 },
+      { from: 8, to: 10 },
+    ],
+  );
+  assert.deepEqual(highlightRuns([{ key: "life" }, { text: "." }], () => true), [{ from: 0, to: 0 }]);
 });

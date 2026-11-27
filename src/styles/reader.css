@@ -591,6 +591,25 @@
   box-shadow: 0 0 0 2px #17803d !important;
   background: color-mix(in oklab, #34c759 36%, transparent) !important;
 }
+/* One continuous bar for a run of saved words, instead of a pill per word. */
+.rd-text .hl-run {
+  background: color-mix(in oklab, #34c759 40%, #fff);
+  border-radius: 0.34em;
+  padding: 0.07em 0.22em 0.09em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.rd-text .hl-run .w,
+.rd-text .hl-run .ph,
+.rd-text .hl-run .w.is-say {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
+  text-decoration: none;
+}
+.rd-text .hl-run .w:hover { box-shadow: none; }
 .rd-text .is-flash {
   animation: rd-flash 2.4s var(--ease);
 }
@@ -2646,6 +2665,29 @@ body.is-study .main { padding: 0; margin: 0; max-width: none; }
   box-shadow: none;
 }
 .desk .rd-text .w.s-new { padding: 0 4px; border-radius: 6px; background: #e7f0ff; }
+.desk .rd-text .hl-run {
+  background: #d8f5e4;
+  color: #137a34;
+  border-radius: 0.42em;
+  padding: 0.12em 0.32em 0.14em;
+  box-shadow: none;
+}
+.desk .rd-text .hl-run .w,
+.desk .rd-text .hl-run .w.s-1,
+.desk .rd-text .hl-run .w.s-2,
+.desk .rd-text .hl-run .w.s-3,
+.desk .rd-text .hl-run .w.s-4,
+.desk .rd-text .hl-run .w.ph,
+.desk .rd-text .hl-run .w.s-new,
+.desk .rd-text .hl-run .ph {
+  background: transparent;
+  color: inherit;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+  box-shadow: none;
+  text-decoration: none;
+}
 @media (max-width: 800px) {
   .desk-split { grid-template-columns: 1fr; overflow: auto; }
   .desk .vs-subs { max-height: none; }

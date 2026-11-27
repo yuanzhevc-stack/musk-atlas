@@ -239,3 +239,31 @@ export function unmarkedWords(
   }
   return out;
 }
+
+/**
+ * Indexes of words that should share one highlight, plus the spaces between them.
+ * A saved word or a phrase word joins the run. Plain gaps stay inside; an unmarked word breaks it.
+ */
+export function highlightRuns<T extends { key?: string }>(
+  tokens: T[],
+  marked: (token: T, index: number) => boolean,
+): { from: number; to: number }[] {
+  const runs: { from: number; to: number }[] = [];
+  let i = 0;
+  while (i < tokens.length) {
+    if (!tokens[i].key || !marked(tokens[i], i)) {
+      i++;
+      continue;
+    }
+    let end = i;
+    while (end + 1 < tokens.length) {
+      let k = end + 1;
+      while (k < tokens.length && !tokens[k].key) k++;
+      if (k < tokens.length && marked(tokens[k], k)) end = k;
+      else break;
+    }
+    runs.push({ from: i, to: end });
+    i = end + 1;
+  }
+  return runs;
+}

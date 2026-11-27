@@ -1,6 +1,6 @@
 /** Video-first study: player and the lesson's own captions. Word taps reuse the reader card. */
 import { BookMarked, BookOpen, Clock, Compass, Copy, Eye, EyeOff, Heart, Maximize, MoreHorizontal, Pause, Pencil, Play, Repeat, RotateCcw, Search, SkipBack, SkipForward } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type RefObject } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { Item, Lesson, Token } from "./model";
 import { normalize, phraseIndex, reader } from "./model";
@@ -8,7 +8,7 @@ import { ecdict, translate } from "./dict";
 import { LocalPlayer } from "./LocalPlayer";
 import { saveChoice, type SourceChoice } from "./hostedLesson";
 import { adoptReady, cacheStatusLine, downloadPercent, enqueueFullCache, forgetReady, fullMediaUrl, openingSource, readFullCache, rememberedJob, rememberedReady, retryFullCache, type CacheView } from "./fullCache";
-import { DESK_MODES, MODE_LABEL, clipReached, dragPhrase, keptCaption, loopDecision, loopRange, nextSpeed, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, showsChinese, unmarkedWords, type DeskMode, type RowDisclosure } from "./lessonDesk";
+import { DESK_MODES, MODE_LABEL, clipReached, dragPhrase, highlightRuns, keptCaption, loopDecision, loopRange, nextSpeed, REPLAY_BLOCKED, rowDisclosure, rowPointer, selectedPhrase, showsChinese, unmarkedWords, type DeskMode, type RowDisclosure } from "./lessonDesk";
 import { LessonPractice } from "./LessonPractice";
 import { readNote, writeNote } from "./lessonNotes";
 import { centerScroll, followAllowed, lessonMedia, sentenceAt, sentenceSpan, shouldRecenter } from "./sync";
@@ -87,28 +87,50 @@ const SentRow = memo(
         >
           {disclosure !== "full" ? (
             <p className="desk-hidden">{disclosure === "answer-hidden" ? "这一句的答案先不放出来。" : "英文先不显示。"}</p>
-          ) : tokens.map((t) => {
-            const ph = phraseRef.current?.get(t.i);
-            const inSel = selFrom >= 0 && t.i >= selFrom && t.i <= selTo;
-            if (!t.key)
+          ) : (() => {
+            const renderTok = (t: (typeof tokens)[number]) => {
+              const ph = phraseRef.current?.get(t.i);
+              const inSel = selFrom >= 0 && t.i >= selFrom && t.i <= selTo;
+              if (!t.key)
+                return (
+                  <span key={t.i} className={`${ph && t.i > ph.from && t.i < ph.to ? "ph" : ""}${inSel ? " in-sel" : ""}`}>
+                    {t.text}
+                  </span>
+                );
+              const it = itemsRef.current?.[t.key];
               return (
-                <span key={t.i} className={`${ph && t.i > ph.from && t.i < ph.to ? "ph" : ""}${inSel ? " in-sel" : ""}`}>
+                <span
+                  key={t.i}
+                  data-ti={t.i}
+                  data-testid="tok"
+                  className={`w ${statusClass(it)}${ph ? " ph" : ""}${inSel ? " in-sel" : ""}${selFrom === t.i ? " sel-a" : ""}${selTo === t.i ? " sel-b" : ""}`}
+                  onClick={(e) => bus.current?.clickWord(t.i, e)}
+                >
                   {t.text}
                 </span>
               );
-            const it = itemsRef.current?.[t.key];
-            return (
-              <span
-                key={t.i}
-                data-ti={t.i}
-                data-testid="tok"
-                className={`w ${statusClass(it)}${ph ? " ph" : ""}${inSel ? " in-sel" : ""}${selFrom === t.i ? " sel-a" : ""}${selTo === t.i ? " sel-b" : ""}`}
-                onClick={(e) => bus.current?.clickWord(t.i, e)}
-              >
-                {t.text}
-              </span>
-            );
-          })}
+            };
+            const marked = (t: (typeof tokens)[number]) => {
+              if (!t.key) return false;
+              if (phraseRef.current?.get(t.i)) return true;
+              const it = itemsRef.current?.[t.key];
+              return !!it && it.status >= 1 && it.status <= 4;
+            };
+            const runs = highlightRuns(tokens, marked);
+            const nodes: ReactNode[] = [];
+            let cursor = 0;
+            for (const run of runs) {
+              for (; cursor < run.from; cursor++) nodes.push(renderTok(tokens[cursor]));
+              nodes.push(
+                <span key={`hl-${tokens[run.from].i}`} className="hl-run">
+                  {tokens.slice(run.from, run.to + 1).map(renderTok)}
+                </span>,
+              );
+              cursor = run.to + 1;
+            }
+            for (; cursor < tokens.length; cursor++) nodes.push(renderTok(tokens[cursor]));
+            return nodes;
+          })()}
         </div>
           {disclosure !== "answer-hidden" && showTr && tr ? (
             <p className="vs-tr" data-testid="vs-tr">{tr}</p>
